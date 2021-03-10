@@ -4,3 +4,6 @@
 *.obj
 *.pdb
 *.tlog
+
+.vs/*
+x64/*
