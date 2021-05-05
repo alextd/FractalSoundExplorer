@@ -57,6 +57,9 @@ VEC2 cx_exp(VEC2 a) {
 VEC2 mandelbrot(VEC2 z, VEC2 c) {
   return cx_sqr(z) + c;
 }
+VEC2 dumb_mandelbrot(VEC2 z, VEC2 c) {
+  return cx_sqr(z);
+}
 VEC2 burning_ship(VEC2 z, VEC2 c) {
   return VEC2(z.x*z.x - z.y*z.y, 2.0*abs(z.x * z.y)) + c;
 }
@@ -109,24 +112,39 @@ vec3 fractal(VEC2 z, VEC2 c) {
   int i;
   switch (iType) {
     case 0: DO_LOOP(mandelbrot); break;
-    case 1: DO_LOOP(burning_ship); break;
+    case 1: DO_LOOP(dumb_mandelbrot); break;
     case 2: DO_LOOP(feather); break;
     case 3: DO_LOOP(sfx); break;
     case 4: DO_LOOP(henon); break;
     case 5: DO_LOOP(duffing); break;
     case 6: DO_LOOP(ikeda); break;
     case 7: DO_LOOP(chirikov); break;
+    case 8: DO_LOOP(burning_ship); break;
   }
 
   if (i != iIters) {
-    float n1 = sin(float(i) * 0.1) * 0.5 + 0.5;
-    float n2 = cos(float(i) * 0.1) * 0.5 + 0.5;
-    return vec3(n1, n2, 1.0) * (1.0 - float(FLAG_USE_COLOR)*0.85);
-  } else if (FLAG_USE_COLOR) {
+    if(FLAG_USE_COLOR)
+    {
+      float n = float(i)/(iIters-1)*0.5f+0.5f;  //white to grey, for island detection
+      return vec3(n, n, n);
+    }
+    else
+    {
+      float n1 = sin(float(i) * 0.1) * 0.5 + 0.5;
+      float n2 = cos(float(i) * 0.1) * 0.5 + 0.5;
+      return vec3(n1, n2, 1.0) * (1.0 - float(FLAG_USE_COLOR)*0.85);
+    } 
+  } 
+  else if (FLAG_USE_COLOR) {
+  
+    return vec3(.2,.2,.2);
+    /*
     sumz = abs(sumz) / iIters;
     vec3 n1 = sin(abs(sumz * 5.0)) * 0.45 + 0.5;
     return n1;
-  } else {
+    */
+  } 
+  else {
     return vec3(0.0, 0.0, 0.0);
   }
 }

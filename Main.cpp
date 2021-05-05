@@ -1,4 +1,4 @@
-#define _USE_MATH_DEFINES
+﻿#define _USE_MATH_DEFINES
 #define _CRT_SECURE_NO_WARNINGS
 #include "WinAudio.h"
 #include <SFML/Graphics.hpp>
@@ -7,24 +7,30 @@
 #include <complex>
 #include <math.h>
 #include <fstream>
+#include <iomanip>
+#include <filesystem>
+#include <thread>
+#include <functional>
+#include <mutex>
+#include <queue>
 
 //Constants
-static const int target_fps = 60;
+static const int target_fps = 24;
 static const int sample_rate = 48000;
 static const int max_freq = 4000;
 static const int window_w_init = 1280;
 static const int window_h_init = 720;
 static const int starting_fractal = 0;
-static const int max_iters = 1200;
 static const double escape_radius_sq = 1000.0;
 static const char window_name[] = "Fractal Sound Explorer";
 
 //Settings
 static int window_w = window_w_init;
 static int window_h = window_h_init;
+static int orbit_iters = 200;
 static double cam_x = 0.0;
 static double cam_y = 0.0;
-static double cam_zoom = 100.0;
+static double cam_zoom = 400.0;
 static int cam_x_fp = 0;
 static int cam_y_fp = 0;
 static double cam_x_dest = cam_x;
@@ -34,9 +40,15 @@ static bool sustain = true;
 static bool normalized = true;
 static bool use_color = false;
 static bool hide_orbit = true;
+static bool hide_label = true;
+static bool draw_exponential_orbit = false;
 static double jx = 1e8;
 static double jy = 1e8;
+static int graphics_iters = 1000;
 static int frame = 0;
+static bool mute = true;
+static bool drawIterPoints = false;
+static bool freezeOrbit = true, drawFreezeIndex = false;
 
 //Fractal abstraction definition
 typedef void (*Fractal)(double&, double&, double, double);
@@ -57,11 +69,32 @@ void PtToScreen(double px, double py, int& x, int& y) {
   x = int(cam_zoom * (px + cam_x)) + window_w / 2;
   y = int(cam_zoom * (py + cam_y)) + window_h / 2;
 }
+int PtXToScreen(double px) {
+  return int(cam_zoom * (px + cam_x)) + window_w / 2;
+}
+int PtYToScreen(double py) {
+  return int(cam_zoom * (py + cam_y)) + window_h / 2;
+}
 
 //All fractal equations
 void mandelbrot(double& x, double& y, double cx, double cy) {
   double nx = x*x - y*y + cx;
   double ny = 2.0*x*y + cy;
+  x = nx;
+  y = ny;
+}
+void mandelbrot_half(double& x, double& y) {
+  double nx = x * x - y * y;
+  double ny = 2.0 * x * y;
+  x = nx;
+  y = ny;
+}
+void mandelbrot2(double& x, double& y, double cx, double cy) {
+  x += cx; y += cy;
+}
+void dumb_mandelbrot(double& x, double& y, double cx, double cy) {
+  double nx = x * x - y * y;
+  double ny = 2.0 * x * y;
   x = nx;
   y = ny;
 }
@@ -116,14 +149,337 @@ void chirikov(double& x, double& y, double cx, double cy) {
 //List of fractal equations
 static const Fractal all_fractals[] = {
   mandelbrot,
-  burning_ship,
+  dumb_mandelbrot,
   feather,
   sfx,
   henon,
   duffing,
   ikeda,
   chirikov,
+  burning_ship,
 };
+
+void PtToPolar(double x, double y, double& theta, double& radius)
+{
+  if (x == 0 && y == 0)
+  {
+    radius = 0; theta = 0; return;
+  }
+  radius = std::sqrt(y * y + x * x);
+  theta = -std::atan(y / x);
+  if (x < 0) theta += M_PI;
+  else if (y > 0) theta += 2*M_PI;
+  // * 180 / M_PI
+}
+
+void PolarToPt(double theta, double radius, double& x, double& y)
+{
+  x = radius * std::cos(theta);
+  y = - radius * std::sin(theta);
+}
+
+//Grid-drawing
+
+static enum class GridType { None, Points, Grid, Polar, PolarFocus, Count } draw_grid = GridType::Points;
+double polarGridTheta, polarGridRadius;
+
+inline GridType& operator++(enum GridType& state, int) {
+  const int i = static_cast<int>(state) + 1;
+  state = static_cast<GridType>((i) % static_cast<int>(GridType::Count));
+  return state;
+}
+
+const int grid_detail = 2; //About 2^grid_detail lines
+
+void DrawGrid(const sf::Window& window)
+{
+  int sx, sy;
+  switch(draw_grid)
+  {
+  case GridType::Grid:
+  {
+    double minx, miny, maxx, maxy;
+    ScreenToPt(0, 0, minx, miny);
+    ScreenToPt(window_w, window_h, maxx, maxy);
+    double dx = (maxx - minx);
+    dx = ldexp(1, ilogb(dx) - grid_detail); //Round down to closest power of 2, and cut into 2^grid_detail chunks
+
+    glLineWidth(1.0f);
+    glColor4f(1, 1, 1, 0.5f);
+    glBegin(GL_LINES);
+    minx = floor(minx / dx) * dx;
+    for (double gx = minx; gx < maxx; gx += dx)
+    {
+      sx = PtXToScreen(gx);
+      glVertex2i(sx, 0);    glVertex2i(sx, window_h);
+    }
+    miny = floor(miny / dx) * dx;
+    for (double gy = miny; gy < maxy; gy += dx)
+    {
+      sy = PtYToScreen(gy);
+      glVertex2i(0, sy);    glVertex2i(window_w, sy);
+    }
+
+    glEnd();
+  }
+  [[fallthrough]];
+  case GridType::Points:
+    glPointSize(12.0f);
+    glColor3f(0, 0, 0);
+    glBegin(GL_POINTS);
+    PtToScreen(0, 0, sx, sy);
+    glVertex2i(sx, sy);
+    PtToScreen(1, 0, sx, sy);
+    glVertex2i(sx, sy);
+    PtToScreen(0, -1, sx, sy);
+    glVertex2i(sx, sy);
+    glEnd();
+    glPointSize(10.0f);
+    glColor3f(.8f, .8f, 1);
+    glBegin(GL_POINTS);
+    PtToScreen(0, 0, sx, sy);
+    glVertex2i(sx, sy);
+    PtToScreen(1, 0, sx, sy);
+    glVertex2i(sx, sy);
+    PtToScreen(0, -1, sx, sy);
+    glVertex2i(sx, sy);
+    glEnd();
+    break;
+
+  case GridType::Polar:
+    for (double radius = .25; radius <= 1.0; radius += .25)
+    {
+      glLineWidth(1.0f);
+      glColor4f(1, 1, 1, 0.5f);
+      glBegin(GL_LINE_LOOP);
+      for (double theta = 0; theta < 2 * M_PI; theta += M_PI / 30)
+      {
+        double px, py;
+        PolarToPt(theta, radius, px, py);
+        PtToScreen(px, py, sx, sy);
+        glVertex2i(sx, sy);
+      }
+      glEnd();
+    }
+    glBegin(GL_LINES);
+    int ox, oy;
+    PtToScreen(0, 0, ox, oy);
+    for (double theta = 0; theta < 2 * M_PI; theta += M_PI / 4)
+    {
+      double px, py;
+      PolarToPt(theta, 1, px, py);
+      PtToScreen(px, py, sx, sy);
+      glVertex2i(sx, sy);
+      glVertex2i(ox, oy);
+    }
+    glEnd();
+    break;
+
+  case GridType::PolarFocus:
+  {
+    glLineWidth(1.0f);
+    glColor4f(1, 1, 1, 0.5f);
+    glBegin(GL_LINE_LOOP);
+    double px, py;
+    for (double theta = 0; theta < 2 * M_PI; theta += M_PI / 30)
+    {
+      PolarToPt(theta, polarGridRadius, px, py);
+      PtToScreen(px, py, sx, sy);
+      glVertex2i(sx, sy);
+    }
+    glEnd();
+    glBegin(GL_LINE_STRIP);
+    PtToScreen(polarGridRadius*2, 0, sx, sy);
+    glVertex2i(sx, sy);
+    PtToScreen(0, 0, sx, sy);
+    glVertex2i(sx, sy);
+    PolarToPt(polarGridTheta, polarGridRadius*2, px, py);
+    PtToScreen(px, py, sx, sy);
+    glVertex2i(sx, sy);
+    glEnd();
+  }
+  break;
+
+  }
+}
+
+//Color Cycling
+//-- code from somehere:
+typedef struct {
+float r;       // ∈ [0, 1]
+float g;       // ∈ [0, 1]
+float b;       // ∈ [0, 1]
+} rgb;
+
+typedef struct {
+  float h;       // ∈ [0, 360]
+  float s;       // ∈ [0, 1]
+  float v;       // ∈ [0, 1]
+} hsv;
+
+rgb hsv2rgb(hsv HSV)
+{
+  rgb RGB;
+  float H = HSV.h, S = HSV.s, V = HSV.v,
+    P, Q, T,
+    fract;
+
+  (H == 360) ? (H = 0) : (H /= 60);
+  fract = H - floor(H);
+
+  P = V * (1 - S);
+  Q = V * (1 - S * fract);
+  T = V * (1 - S * (1 - fract));
+
+  if (0 <= H && H < 1)
+    RGB = { V, T, P };
+  else if (1 <= H && H < 2)
+    RGB = { Q, V, P };
+  else if (2 <= H && H < 3)
+    RGB = { P, V, T };
+  else if (3 <= H && H < 4)
+    RGB = { P, Q, V };
+  else if (4 <= H && H < 5)
+    RGB = { T, P, V };
+  else if (5 <= H && H < 6)
+    RGB = { V, P, Q };
+  else
+    RGB = { 0, 0, 0 };
+
+  return RGB;
+}
+//-- end code from somewhere
+static int color_cycle = 1;
+void SetColor(int i)
+{
+  hsv val{ (i% color_cycle) * 360.f/color_cycle, 1, 1 };
+  rgb result = hsv2rgb(val);
+  glColor3f(result.r, result.g, result.b);
+}
+
+
+//drawing a step, gets complicated to draw half-steps
+static enum class HalfStep { None, Half, Rot, Count } half_step_mode;
+
+inline HalfStep& operator++(enum HalfStep& state, int) {
+  const int i = static_cast<int>(state) + 1;
+  state = static_cast<HalfStep>((i) % static_cast<int>(HalfStep::Count));
+  return state;
+}
+
+void DrawStep(double& x, double& y, double cx, double cy, int i)
+{
+  int sx, sy;
+  double hx = x, hy = y;//copies for half-points
+
+  //Previous point x,y has been plotted in red
+  switch (half_step_mode)
+  {
+  case HalfStep::None:
+    //ezpz, draw next point, also in red.
+    fractal(x, y, cx, cy);
+    PtToScreen(x, y, sx, sy);
+    if (color_cycle > 1 && freezeOrbit)
+      SetColor(i);
+    glVertex2i(sx, sy);
+    break;
+
+  case HalfStep::Half:
+    //Apply half-function for half-way point
+    mandelbrot_half(hx, hy);//TODO: other than mandelbrot
+    PtToScreen(hx, hy, sx, sy);
+
+    //Draw line to half-point, blended to yellow
+    glColor3f(1.0f, 1.0f, 0.0f);
+    glVertex2i(sx, sy);
+
+    //Re-do the point, starting new green line
+    glColor3f(0.0f, 1.0f, 0.0f);
+    glVertex2i(sx, sy);
+    
+    
+    //Apply fractal function for next point
+    fractal(x, y, cx, cy);
+    PtToScreen(x, y, sx, sy);
+
+    //Blend to yellow to next point
+    glColor3f(1.0f, 1.0f, 0.0f);
+    glVertex2i(sx, sy);
+
+    //Re-set color to red for the next point
+    glColor3f(1.0f, 0.0f, 0.0f);
+    glVertex2i(sx, sy);
+    
+    break;
+  case HalfStep::Rot: //Todo: other than mandelbrot
+    double theta, radius;
+    PtToPolar(x, y, theta, radius);
+    if (theta > M_PI) theta -= 2* M_PI;
+    if (theta < -M_PI) theta += 2* M_PI;
+
+
+    if (!drawIterPoints)
+    {
+      for (int i = 0; i < 32; i++)
+      {
+        float pct = i / 32.0f;
+        double t = theta * (1.0 + pct);
+        PolarToPt(t, radius, hx, hy);
+        PtToScreen(hx, hy, sx, sy);
+        glColor3f(1.0f, pct, 0.0f);
+        glVertex2i(sx, sy);
+      }
+    }
+    theta *= 2;//TODO not mandelbrot
+    PolarToPt(theta, radius, hx, hy);
+    PtToScreen(hx, hy, sx, sy);
+    //Draw Yellow 1/3 Point
+    glColor3f(1.0f, 1.0f, 0.0f);
+    glVertex2i(sx, sy);
+    
+    radius *= radius;
+    PolarToPt(theta, radius, hx, hy);
+    PtToScreen(hx, hy, sx, sy);
+    if (!drawIterPoints) {
+      glColor3f(1.0f, 1.0f, 1.0f);
+      glVertex2i(sx, sy);
+    }
+
+
+    //Draw Green 1/2 Point
+    glColor3f(0.0f, 1.0f, 0.0f);
+    glVertex2i(sx, sy);
+
+
+    //Apply fractal function for next point
+    fractal(x, y, cx, cy);
+    PtToScreen(x, y, sx, sy);
+
+    if (drawIterPoints)
+    {
+      //Draw Red Point
+      glColor3f(1.0f, 0.0f, 0.0f);
+      glVertex2i(sx, sy);
+    }
+    else
+    {
+      //Blend to yellow to next point
+      glColor3f(1.0f, 1.0f, 0.0f);
+      glVertex2i(sx, sy);
+      glEnd();
+
+      //Draw big points over lines still
+      glBegin(GL_POINTS);
+      glColor3f(1.0f, 0.0f, 0.0f);
+      glVertex2i(sx, sy);
+      glEnd();
+      glBegin(GL_LINE_STRIP);
+    }
+    break;
+  }
+};
+
+
 
 //Synthesizer class to inherit Windows Audio.
 class Synth : public WinAudio {
@@ -265,6 +621,17 @@ public:
   double dpy;
 };
 
+void PtToString(double x, double y, std::string& str)
+{
+  // precise stream to print coordinates
+  std::ostringstream pointStrStream;
+  // Set Fixed -Point Notation
+  pointStrStream << std::fixed;
+  pointStrStream << std::setprecision(10);
+  pointStrStream << x << ", " << -y;
+  str = pointStrStream.str();
+}
+
 //Change the fractal
 void SetFractal(sf::Shader& shader, int type, Synth& synth) {
   shader.setUniform("iType", type);
@@ -274,6 +641,141 @@ void SetFractal(sf::Shader& shader, int type, Synth& synth) {
   synth.audio_pause = true;
   hide_orbit = true;
   frame = 0;
+}
+
+//Starting point, C
+double px, py, cTheta, cRadius, orbit_x = 0, orbit_y = 0;
+int orbit_step = 0;
+int highlight_index = 0;
+std::string cAsString;
+
+//Start the process at px,py.
+void StartPoint(Synth& synth)
+{
+  hide_orbit = false;
+  if (!mute) synth.SetPoint(px, py);
+  orbit_x = px;
+  orbit_y = py;
+  orbit_step = 0;
+  PtToPolar(px, py, cTheta, cRadius);
+  cTheta *= 180 / M_PI;
+  PtToString(px, py, cAsString);
+}
+
+//Mouse Point to print
+std::string mouseAsString;
+double mTheta, mRadius;
+
+//Save the Starting Point
+double x_save[10] = { 0 }, y_save[10] = { 0 };
+void SavePoint(int state)
+{
+  x_save[state] = px;
+  y_save[state] = py;
+}
+void LoadPoint(int state, Synth& synth)
+{
+  px = x_save[state];
+  py = y_save[state];
+  StartPoint(synth);
+}
+void SliderPoint(double slider)
+{
+  px = x_save[1] * (1 - slider) + x_save[2] * slider;
+  py = y_save[1] * (1 - slider) + y_save[2] * slider;
+}
+
+//Start point based on click point
+void StartScreenPoint(Synth& synth, int sx, int sy)
+{
+  if (sy < 10 )//Top of screen
+    SliderPoint(1.0 * sx / (window_w - 1)); //pixel 0-1979 -> 0-1
+  else
+    ScreenToPt(sx, sy, px, py);
+  StartPoint(synth);
+}
+
+//Save the Camera View
+double cam_x_save[10] = { 0 }, cam_y_save[10] = { 0 }, cam_zoom_save[10] = { 400, 400, 400, 400, 400, 400, 400, 400, 400, 400 };
+void SaveZoomState(int state)
+{
+  cam_x_save[state] = cam_x;
+  cam_y_save[state] = cam_y;
+  cam_zoom_save[state] = cam_zoom;
+}
+void LoadZoomState(int state)
+{
+  cam_x_dest = cam_x = cam_x_save[state];
+  cam_y_dest = cam_y = cam_y_save[state];
+  cam_zoom_dest = cam_zoom = cam_zoom_save[state];
+  frame = 0;
+}
+
+// Text input for the point.
+bool inputting_x = false, inputting_y = false;
+std::string input_str_x = "", input_str_y = "";
+void StartInputPoint()
+{
+  input_str_y = "";
+  input_str_x = "";
+  inputting_x = true;
+  inputting_y = false;
+}
+void FinalizeInputCoor(Synth& synth)
+{
+  inputting_x = false;
+  inputting_y = false;
+  px = input_str_x.empty() ? 0 : std::stod(input_str_x);
+  py = input_str_y.empty() ? 0 : -std::stod(input_str_y);
+  StartPoint(synth);
+}
+void InputPointKey(const sf::Keyboard::Key key)
+{
+  if (key == sf::Keyboard::Escape)
+  {
+    inputting_x = false;
+    inputting_y = false;
+  }
+  else if (key >= sf::Keyboard::Numpad0 && key <= sf::Keyboard::Numpad9)
+  {
+    if (inputting_x)
+      input_str_x += std::to_string(key - sf::Keyboard::Numpad0);
+    if (inputting_y)
+      input_str_y += std::to_string(key - sf::Keyboard::Numpad0);
+  }
+  else if (key >= sf::Keyboard::Num0 && key <= sf::Keyboard::Num9)
+  {
+    if (inputting_x)
+      input_str_x += std::to_string(key - sf::Keyboard::Num0);
+    if (inputting_y)
+      input_str_y += std::to_string(key - sf::Keyboard::Num0);
+  }
+  else if (key == sf::Keyboard::Period)
+  {
+    if (inputting_x)
+      input_str_x += ".";
+    if (inputting_y)
+      input_str_y += ".";
+  }
+  else if (key == sf::Keyboard::Subtract || key == sf::Keyboard::Hyphen)
+  {
+    if (inputting_x)
+      input_str_x += "-";
+    if (inputting_y)
+      input_str_y += "-";
+  }
+  else if (key == sf::Keyboard::BackSpace)
+  {
+    if (inputting_x && !input_str_x.empty())
+      input_str_x.pop_back();
+    if (inputting_y && !input_str_y.empty())
+      input_str_y.pop_back();
+  }
+  else if (key == sf::Keyboard::Comma)
+  {
+    inputting_x = false;
+    inputting_y = true;
+  }
 }
 
 //Used whenever the window is created or resized
@@ -301,12 +803,32 @@ void make_window(sf::RenderWindow& window, sf::RenderTexture& rt, const sf::Cont
   window.requestFocus();
 }
 
+std::string GetTimestamp()
+{
+  using namespace std::chrono;
+
+  const auto current_time_point{ system_clock::now() };
+  const auto current_time{ system_clock::to_time_t(current_time_point) };
+  const auto current_localtime{ *std::localtime(&current_time) };
+  const auto current_time_since_epoch{ current_time_point.time_since_epoch() };
+  const auto current_milliseconds{ duration_cast<milliseconds> (current_time_since_epoch).count() % 1000 };
+
+  std::ostringstream stream;
+  stream << std::put_time(&current_localtime, "%m-%d-%y_%H-%M-%S") << "." << std::setw(3) << std::setfill('0') << current_milliseconds;
+  return stream.str();
+}
+
+
 //Main entry-point
 #if _WIN32
 INT WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR lpCmdLine, INT nCmdShow) {
 #else
 int main(int argc, char *argv[]) {
 #endif
+  //Capture sf errors
+  std::ofstream file("sfml-log.txt");
+  std::streambuf* previous = sf::err().rdbuf(file.rdbuf());
+
   //Make sure shader is supported
   if (!sf::Shader::isAvailable()) {
     std::cerr << "Graphics card does not support shaders" << std::endl;
@@ -367,12 +889,15 @@ int main(int argc, char *argv[]) {
   synth.play();
 
   //Main Loop
-  double px, py, orbit_x, orbit_y;
   bool leftPressed = false;
+  bool brushing = false;
   bool dragging = false;
   bool juliaDrag = false;
   bool takeScreenshot = false;
+  std::string shot_filename;
   bool showHelpMenu = false;
+  std::vector< sf::Vector2<double>>brushPoints;
+
   sf::Vector2i prevDrag;
   while (window.isOpen()) {
     sf::Event event;
@@ -384,22 +909,59 @@ int main(int argc, char *argv[]) {
         resize_window(window, renderTexture, settings, event.size.width, event.size.height);
       } else if (event.type == sf::Event::KeyPressed) {
         const sf::Keyboard::Key keycode = event.key.code;
-        if (keycode == sf::Keyboard::Escape) {
+        if (inputting_x || inputting_y)
+        {
+          if (keycode == sf::Keyboard::Enter)
+            FinalizeInputCoor(synth);
+          else
+            InputPointKey(keycode);
+        }
+        else if (keycode == sf::Keyboard::Escape) {
           window.close();
           break;
-        } else if (keycode >= sf::Keyboard::Num1 && keycode <= sf::Keyboard::Num8) {
-          SetFractal(shader, keycode - sf::Keyboard::Num1, synth);
+        }
+        else if (keycode == sf::Keyboard::X)
+        {
+          StartInputPoint();
+        }
+        else if (keycode >= sf::Keyboard::F1 && keycode <= sf::Keyboard::F9) {
+          SetFractal(shader, keycode - sf::Keyboard::F1, synth);
+        }
+        else if (keycode >= sf::Keyboard::Num0 && keycode <= sf::Keyboard::Num9) {
+          int state = keycode - sf::Keyboard::Num0;
+          if (event.key.control)
+            SaveZoomState(state);
+          else
+            LoadZoomState(state);
+        }
+        else if (keycode >= sf::Keyboard::Numpad0 && keycode <= sf::Keyboard::Numpad9) {
+          int state = keycode - sf::Keyboard::Numpad0;
+          if (event.key.control)
+            SavePoint(state);
+          else
+            LoadPoint(state, synth);
+        } else if (keycode == sf::Keyboard::Tilde) {
+          StartPoint(synth);
         } else if (keycode == sf::Keyboard::F11) {
           toggle_fullscreen = true;
         } else if (keycode == sf::Keyboard::D) {
           sustain = !sustain;
+        } else if (keycode == sf::Keyboard::G) {
+          draw_grid++;
+          if (draw_grid == GridType::PolarFocus)
+          {
+            double px, py;
+            const sf::Vector2i mouse_pos = sf::Mouse::getPosition(window);
+            ScreenToPt(mouse_pos.x, mouse_pos.y, px, py);
+            PtToPolar(px, py, polarGridTheta, polarGridRadius);
+          }
         } else if (keycode == sf::Keyboard::C) {
           use_color = !use_color;
           frame = 0;
         } else if (keycode == sf::Keyboard::R) {
           cam_x = cam_x_dest = 0.0;
           cam_y = cam_y_dest = 0.0;
-          cam_zoom = cam_zoom_dest = 100.0;
+          cam_zoom = cam_zoom_dest = 400.0;
           frame = 0;
         } else if (keycode == sf::Keyboard::J) {
           if (jx < 1e8) {
@@ -416,11 +978,90 @@ int main(int argc, char *argv[]) {
           takeScreenshot = true;
         } else if (keycode == sf::Keyboard::H) {
           showHelpMenu = !showHelpMenu;
+        } else if (keycode == sf::Keyboard::L) {
+          hide_label = !hide_label;
+        } else if (keycode == sf::Keyboard::E) {
+          draw_exponential_orbit = !draw_exponential_orbit;
+        } else if (keycode == sf::Keyboard::Space) {
+          freezeOrbit = !freezeOrbit;
+        } else if (keycode == sf::Keyboard::LBracket) {
+          if (event.key.shift){
+            orbit_iters /= 2; if (orbit_iters == 0) orbit_iters = 1;
+          }
+          else {
+            graphics_iters /= 2; if (graphics_iters == 0) graphics_iters = 1;
+            shader.setUniform("iIters", graphics_iters);
+          }
+        } else if (keycode == sf::Keyboard::RBracket) {
+          if (event.key.shift){
+            orbit_iters *= 2;
+          }
+          else {
+            graphics_iters *= 2;
+            shader.setUniform("iIters", graphics_iters);
+          }
+        } else if (keycode == sf::Keyboard::Down) {
+          drawFreezeIndex = false;
+          highlight_index = 0;
+        } else if (keycode == sf::Keyboard::Left) {
+          drawFreezeIndex = true;
+          highlight_index -= event.key.control ? 3 : event.key.shift ? 30 : 1; 
+          if (highlight_index < 0) highlight_index = 0;
+        } else if (keycode == sf::Keyboard::Right) {
+          drawFreezeIndex = true;
+          highlight_index += event.key.control ? 3 : event.key.shift ? 30 : 1;
+          if (highlight_index > orbit_iters) highlight_index = orbit_iters;
+        } else if (keycode == sf::Keyboard::F) {
+          double x = orbit_x;
+          double y = orbit_y;
+          int numSteps = event.key.control ? 1 : event.key.shift ? 100 : 10;
+          for (int i = 0; i < numSteps; ++i) {
+            fractal(x, y, px, py);
+            if (x * x + y * y > escape_radius_sq) {
+              break;
+            }
+
+            orbit_step ++;
+          }
+          orbit_x = x;
+          orbit_y = y;
+        } else if (keycode == sf::Keyboard::M) {
+          mute = !mute;
+          synth.audio_pause = mute;
+        } else if (keycode == sf::Keyboard::Z) {
+          half_step_mode++;
+        } else if (keycode == sf::Keyboard::N) {
+          if (event.key.shift)
+          {
+            color_cycle--;
+            if (color_cycle < 1) color_cycle = 1;
+          }
+          else color_cycle++;
+        } else if (keycode == sf::Keyboard::P) {
+          drawIterPoints = !drawIterPoints;
+        } else if (keycode == sf::Keyboard::B) {
+          brushing = !event.key.shift;
+          if (event.key.control)
+            if (!brushPoints.empty()) brushPoints.pop_back();
+
+          if(event.key.shift)
+            brushPoints.clear();
+          else
+          {
+            double bx, by;
+            const sf::Vector2i mouse_pos = sf::Mouse::getPosition(window);
+            ScreenToPt(mouse_pos.x, mouse_pos.y, bx, by);
+            brushPoints.push_back(sf::Vector2(bx, by));
+          }
         }
       } else if (event.type == sf::Event::KeyReleased) {
         if (event.key.code == sf::Keyboard::J) {
           juliaDrag = false;
           frame = 0;
+        }
+        else if (event.key.code == sf::Keyboard::B) {
+          brushing = false;
+          brushPoints.push_back(sf::Vector2(std::numeric_limits<double>::max(), 0.0));
         }
       } else if (event.type == sf::Event::MouseWheelMoved) {
         cam_zoom_dest *= std::pow(1.1f, event.mouseWheel.delta);
@@ -430,40 +1071,45 @@ int main(int argc, char *argv[]) {
       } else if (event.type == sf::Event::MouseButtonPressed) {
         if (event.mouseButton.button == sf::Mouse::Left) {
           leftPressed = true;
-          hide_orbit = false;
-          ScreenToPt(event.mouseButton.x, event.mouseButton.y, px, py);
-          synth.SetPoint(px, py);
-          orbit_x = px;
-          orbit_y = py;
-        } else if (event.mouseButton.button == sf::Mouse::Middle) {
+          StartScreenPoint(synth, event.mouseButton.x, event.mouseButton.y);
+        } else if (event.mouseButton.button == sf::Mouse::Right) {
           prevDrag = sf::Vector2i(event.mouseButton.x, event.mouseButton.y);
           dragging = true;
-        } else if (event.mouseButton.button == sf::Mouse::Right) {
+        } else if (event.mouseButton.button == sf::Mouse::XButton1) {
           synth.audio_pause = true;
           hide_orbit = true;
         }
       } else if (event.type == sf::Event::MouseButtonReleased) {
         if (event.mouseButton.button == sf::Mouse::Left) {
           leftPressed = false;
-        } else if (event.mouseButton.button == sf::Mouse::Middle) {
+        } else if (event.mouseButton.button == sf::Mouse::Right) {
           dragging = false;
         }
       } else if (event.type == sf::Event::MouseMoved) {
+        int sx = event.mouseMove.x, sy = event.mouseMove.y;
+        double mx, my;
+        ScreenToPt(sx, sy, mx, my);
+
+        PtToPolar(mx, my, mTheta, mRadius);
+        mTheta *= 180 / M_PI;
+        PtToString(mx, my, mouseAsString);
+
+        if (brushing) {
+          brushPoints.push_back(sf::Vector2(mx, my));
+        }
         if (leftPressed) {
-          ScreenToPt(event.mouseMove.x, event.mouseMove.y, px, py);
-          synth.SetPoint(px, py);
-          orbit_x = px;
-          orbit_y = py;
+          StartScreenPoint(synth, sx, sy);
         }
         if (dragging) {
-          sf::Vector2i curDrag = sf::Vector2i(event.mouseMove.x, event.mouseMove.y);
+          sf::Vector2i curDrag = sf::Vector2i(sx, sy);
           cam_x_dest += (curDrag.x - prevDrag.x) / cam_zoom;
           cam_y_dest += (curDrag.y - prevDrag.y) / cam_zoom;
           prevDrag = curDrag;
           frame = 0;
         }
         if (juliaDrag) {
-          ScreenToPt(event.mouseMove.x, event.mouseMove.y, jx, jy);
+          jx = mx;
+          jy = my;
           frame = 0;
         }
       }
@@ -472,7 +1118,7 @@ int main(int argc, char *argv[]) {
     //Apply zoom
     double fpx, fpy, delta_cam_x, delta_cam_y;
     ScreenToPt(cam_x_fp, cam_y_fp, fpx, fpy);
-    cam_zoom = cam_zoom*0.8 + cam_zoom_dest*0.2;
+    cam_zoom = cam_zoom*0.5 + cam_zoom_dest*0.5;
     ScreenToPt(cam_x_fp, cam_y_fp, delta_cam_x, delta_cam_y);
     cam_x_dest += delta_cam_x - fpx;
     cam_y_dest += delta_cam_y - fpy;
@@ -494,7 +1140,7 @@ int main(int argc, char *argv[]) {
     shader.setUniform("iZoom", (float)cam_zoom);
     shader.setUniform("iFlags", flags);
     shader.setUniform("iJulia", sf::Vector2f((float)jx, (float)jy));
-    shader.setUniform("iIters", max_iters);
+    shader.setUniform("iIters", graphics_iters);
     shader.setUniform("iTime", frame);
 
     //Draw the full-screen shader to the render texture
@@ -525,31 +1171,176 @@ int main(int argc, char *argv[]) {
       takeScreenshot = false;
     }
 
-    //Draw the orbit
-    if (!hide_orbit) {
-      glLineWidth(1.0f);
-      glColor3f(1.0f, 0.0f, 0.0f);
-      glBegin(GL_LINE_STRIP);
-      int sx, sy;
-      double x = orbit_x;
-      double y = orbit_y;
-      PtToScreen(x, y, sx, sy);
-      glVertex2i(sx, sy);
-      double cx = (hasJulia ? jx : px);
-      double cy = (hasJulia ? jy : py);
-      for (int i = 0; i < 200; ++i) {
-        fractal(x, y, cx, cy);
+
+    int sx, sy;
+    //Draw a few grid points for reference
+    DrawGrid(window);
+
+    if (inputting_x || inputting_y)
+    {
+      glPushMatrix();
+      sf::RectangleShape dimRect(sf::Vector2f((float)window_w, (float)window_h / 10));
+      dimRect.setFillColor(sf::Color(0, 0, 0, 128));
+      window.draw(dimRect, sf::RenderStates(BlendAlpha));
+
+      sf::Text input_text;
+      input_text.setFont(font);
+      input_text.setCharacterSize(24);
+      input_text.setFillColor(sf::Color::White);
+      input_text.setString(
+        "Input: " + input_str_x + ", " + input_str_y);
+      input_text.setPosition(20.0f, 5.0f);
+      window.draw(input_text);
+      glPopMatrix();
+    }
+    else
+    {
+      //Draw the orbit
+      if (!hide_orbit) {
+        double cx = (hasJulia ? jx : px);
+        double cy = (hasJulia ? jy : py);
+
+
+        //Draw the lines
+        double hx = -50, hy = -50;//highlight point, default out of sight
+
+        glLineWidth(2.0f);
+        glPointSize(5.0f);
+        glColor3f(1.0f, 0.0f, 0.0f);
+        glBegin(drawIterPoints ? GL_POINTS : GL_LINE_STRIP);
+        double freeze_x = orbit_x, freeze_y = orbit_y;
+        int stepsDone = 0;
+        double x = orbit_x;
+        double y = orbit_y;
         PtToScreen(x, y, sx, sy);
         glVertex2i(sx, sy);
-        if (x*x + y*y > escape_radius_sq) {
-          break;
-        } else if (i < max_freq / target_fps) {
-          orbit_x = x;
-          orbit_y = y;
+        if (freezeOrbit && 0 == highlight_index)
+        {
+          hx = x; hy = y;
+        }
+
+        int i, exponential_i = 1;
+        for (i = 0; i < orbit_iters; ++i) {
+          if (draw_exponential_orbit && (i+1 != exponential_i))
+            fractal(x, y, cx, cy);
+          else
+          {
+            exponential_i <<= 1;
+            DrawStep(x, y, cx, cy, i+1);
+          }
+
+          if (freezeOrbit && i == highlight_index - 1)
+          {
+            hx = x; hy = y;
+          }
+
+          if (x * x + y * y > escape_radius_sq) {
+            break;
+          }
+          else if (i < max_freq / target_fps) {
+            orbit_x = x;
+            orbit_y = y;
+            stepsDone = i + 1;
+          }
+        }
+        glEnd();
+
+        //Draw the starting point
+        glPointSize(8.0f);
+        glBegin(GL_POINTS);
+        PtToScreen(cx, cy, sx, sy);
+        glColor3f(1, 1, 1);
+        glVertex2i(sx, sy);
+        glEnd();
+        glPointSize(4.0f);
+        glBegin(GL_POINTS);
+        glColor3f(0, 1, 1);
+        glVertex2i(sx, sy);
+        glEnd();
+
+        //Draw highlighted point
+        if (drawFreezeIndex)
+        {
+          glPointSize(10.0f);
+          glColor4f(1, 1, 1, .5f);
+          glBegin(GL_POINTS);
+          PtToScreen(hx, hy, sx, sy);
+          glVertex2i(sx, sy);
+          if (half_step_mode != HalfStep::None)
+          {
+            mandelbrot_half(hx, hy);//todo other than mandelbrot
+            PtToScreen(hx, hy, sx, sy);
+            glVertex2i(sx, sy);
+          }
+          glEnd();
+        }
+
+        if (freezeOrbit)
+        {
+          orbit_x = freeze_x;
+          orbit_y = freeze_y;
+        }
+        else
+        {
+          orbit_step += stepsDone;
+        }
+      }
+
+      //Draw point label
+      if (!hide_label)
+      {
+        glPushMatrix();
+        sf::Text orbit_stepText;
+        orbit_stepText.setFont(font);
+        orbit_stepText.setCharacterSize(24);
+        orbit_stepText.setFillColor(sf::Color::White);
+
+        sf::RectangleShape dimRect(sf::Vector2f((float)window_w,
+          10 + 3 * font.getLineSpacing(24)));
+        dimRect.setFillColor(sf::Color(0, 0, 0, 128));
+        window.draw(dimRect, sf::RenderStates(BlendAlpha));
+
+        window.pushGLStates();
+        orbit_stepText.setPosition(20.0f, 5.0f);
+        orbit_stepText.setString(
+          "C = " + cAsString + "\n" +
+          "Mouse: " + mouseAsString + "\n" +
+          "Step: " + std::to_string(orbit_step) + "\tMax Iterations: " + std::to_string(orbit_iters) + "/" + std::to_string(graphics_iters));
+        window.draw(orbit_stepText);
+
+        orbit_stepText.setString(
+          "(" + std::to_string(cTheta) + "°, " + std::to_string(cRadius) + ")\n" +
+          "(" + std::to_string(mTheta) + "°, " + std::to_string(mRadius) + ")");
+        orbit_stepText.setPosition(window_w / 2 + 10.0f, 5.0f);
+        window.draw(orbit_stepText);
+        window.popGLStates();
+        glPopMatrix();
+      }
+    }
+
+
+    //Draw brush stroke
+    if (!brushPoints.empty())
+    {
+      glColor3f(1, 1, 1);
+      glBegin(GL_LINE_STRIP);
+      int sx, sy;
+      for (auto&& bPoint : brushPoints)
+      {
+        if (bPoint.x == std::numeric_limits<double>::max())
+        {
+          glEnd();
+          glBegin(GL_LINE_STRIP);
+        }
+        else
+        {
+          PtToScreen(bPoint.x, bPoint.y, sx, sy);
+          glVertex2i(sx, sy);
         }
       }
       glEnd();
     }
+    
 
     //Draw help menu
     if (showHelpMenu) {
@@ -562,22 +1353,26 @@ int main(int argc, char *argv[]) {
       helpMenu.setFillColor(sf::Color::White);
       helpMenu.setString(
         "  H - Toggle Help Menu                Left Mouse - Click or drag to hear orbits\n"
-        "  D - Toggle Audio Dampening        Middle Mouse - Drag to pan view\n"
-        "  C - Toggle Color                   Right Mouse - Stop orbit and sound\n"
+        "  D - Toggle Audio Dampening         Right Mouse - Drag to pan view\n"
+        "  C - Toggle Color                    Side Mouse - Stop orbit and sound\n"
         "F11 - Toggle Fullscreen             Scroll Wheel - Zoom in and out\n"
-        "  S - Save Snapshot\n"
-        "  R - Reset View\n"
-        "  J - Hold down, move mouse, and\n"
-        "      release to make Julia sets.\n"
+        "  S - Save Snapshot                            X - Input x,y (then press enter, esc to cancel).\n"
+        "  R - Reset View                        Spacebar - Animate/pause current orbit (showing next 200 steps).\n"
+        "       # - Load View                  Left/Right - Highlight next point (when paused) ctrl:3x, shift:30x - Down ends\n"
+        "  Ctrl-# - Save View                           F - Step current orbit when paused(next 10 steps, ctrl:1, shift:100)\n"
+        "  ` - Repeat Point                  Ctrl-Numpad# - Save Point\n"  
+        "  J - Hold down, move mouse, and         Numpad# - Load Point\n"
+        "      release to make Julia sets.    (Drag mouse from top-left corner to top-right corner to blend #1 => #2)\n"
         "      Press again to switch back.\n"
-        "  1 - Mandelbrot Set\n"
-        "  2 - Burning Ship\n"
-        "  3 - Feather Fractal\n"
-        "  4 - SFX Fractal\n"
-        "  5 - H�non Map\n"
-        "  6 - Duffing Map\n"
-        "  7 - Ikeda Map\n"
-        "  8 - Chirikov Map\n"
+        "  F1 - Mandelbrot Set                  Z - Toggle Showing Mandelbrot half-steps.\n"
+        "  F2 - Dumb Mandelbrot                 G - Cycle grid drawing states\n"
+        "  F3 - Feather Fractal                 L - Toggle labels\n"
+        "  F4 - SFX Fractal                     E - Draw exponential steps (1,2,4,8th step...)\n"
+        "  F5 - Hénon Map                     [ ] - Inc/decrease iterations (shift-[] for drawn lines) \n"
+        "  F6 - Duffing Map                     Z - Show Mandelbrot Half-steps\n"
+        "  F7 - Ikeda Map                       N - Use cyclic colors (each N adds another color, shift-N removes one)\n"
+        "  F8 - Chirikov Map                    B - Drag and draw lines. Ctrl-B connects to previous point. Shift-B erases.\n"
+        "  F9 - Burning Ship\n"
       );
       helpMenu.setPosition(20.0f, 20.0f);
       window.draw(helpMenu);
