@@ -99,7 +99,7 @@ void mandelbrot(double& x, double& y, double cx, double cy) {
   x = nx;
   y = ny;
 }
-void mandelbrot_half(double& x, double& y) {
+void complex_square(double& x, double& y) {
   double nx = x * x - y * y;
   double ny = 2.0 * x * y;
   x = nx;
@@ -405,7 +405,7 @@ void DrawStep(double& x, double& y, double cx, double cy, int i)
 
   case HalfStep::Half:
     //Apply half-function for half-way point
-    mandelbrot_half(hx, hy);//TODO: other than mandelbrot
+    complex_square(hx, hy);//TODO: other than mandelbrot
     PtToScreen(hx, hy, sx, sy);
 
     //Draw line to half-point, blended to yellow
@@ -709,6 +709,15 @@ void StartScreenPoint(Synth& synth, int sx, int sy)
 {
   if (sy < 10 )//Top of screen
     SliderPoint(1.0 * sx / (window_w - 1)); //pixel 0-1979 -> 0-1
+  else if (window_h - sy < 10)//BOTTOM of screen
+  {
+    double theta = M_PI * ((sx+1.0) / (window_w)); //this goes from 1 - window_w instead of 0-window_ so that we get a divisible by 1920 number
+    double tx, ty, htx, hty;
+    PolarToPt(theta, .5, tx, ty);
+    htx = tx; hty = ty;
+    complex_square(htx, hty);
+    px = tx - htx; py = ty - hty;
+  }
   else
     ScreenToPt(sx, sy, px, py);
   StartPoint(synth);
@@ -1321,7 +1330,7 @@ int main(int argc, char *argv[]) {
           glVertex2i(sx, sy);
           if (half_step_mode != HalfStep::None)
           {
-            mandelbrot_half(hx, hy);//todo other than mandelbrot
+            complex_square(hx, hy);//todo other than mandelbrot
             PtToScreen(hx, hy, sx, sy);
             glVertex2i(sx, sy);
           }
