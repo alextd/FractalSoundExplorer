@@ -357,6 +357,8 @@ void SetColor(int i)
   glColor3f(result.r, result.g, result.b);
 }
 
+static int draw_cycle = 1;
+
 
 //drawing a step, gets complicated to draw half-steps
 static enum class HalfStep { None, Half, Rot, Count } half_step_mode;
@@ -381,7 +383,8 @@ void DrawStep(double& x, double& y, double cx, double cy, int i)
     PtToScreen(x, y, sx, sy);
     if (color_cycle > 1 && freezeOrbit)
       SetColor(i);
-    glVertex2i(sx, sy);
+    if( i % draw_cycle == 0)
+      glVertex2i(sx, sy);
     break;
 
   case HalfStep::Half:
@@ -986,7 +989,11 @@ int main(int argc, char *argv[]) {
           freezeOrbit = !freezeOrbit;
         } else if (keycode == sf::Keyboard::LBracket) {
           if (event.key.shift){
-            orbit_iters /= 2; if (orbit_iters == 0) orbit_iters = 1;
+            if (event.key.control)
+              orbit_iters -= 1;
+            else
+              orbit_iters /= 2;
+            if (orbit_iters == 0) orbit_iters = 1;
           }
           else {
             graphics_iters /= 2; if (graphics_iters == 0) graphics_iters = 1;
@@ -994,7 +1001,10 @@ int main(int argc, char *argv[]) {
           }
         } else if (keycode == sf::Keyboard::RBracket) {
           if (event.key.shift){
-            orbit_iters *= 2;
+            if (event.key.control)
+              orbit_iters += 1;
+            else
+              orbit_iters *= 2;
           }
           else {
             graphics_iters *= 2;
@@ -1037,6 +1047,13 @@ int main(int argc, char *argv[]) {
             if (color_cycle < 1) color_cycle = 1;
           }
           else color_cycle++;
+        } else if (keycode == sf::Keyboard::O) {
+          if (event.key.shift)
+          {
+            draw_cycle--;
+            if (draw_cycle < 1) draw_cycle = 1;
+          }
+          else draw_cycle++;
         } else if (keycode == sf::Keyboard::P) {
           drawIterPoints = !drawIterPoints;
         } else if (keycode == sf::Keyboard::B) {
@@ -1368,11 +1385,11 @@ int main(int argc, char *argv[]) {
         "  F2 - Dumb Mandelbrot                 G - Cycle grid drawing states\n"
         "  F3 - Feather Fractal                 L - Toggle labels\n"
         "  F4 - SFX Fractal                     E - Draw exponential steps (1,2,4,8th step...)\n"
-        "  F5 - Hénon Map                     [ ] - Inc/decrease iterations (shift-[] for drawn lines) \n"
+        "  F5 - Hénon Map                     [ ] - Inc/decrease iterations *2 (shift-[] for drawn lines, ctrl-[] steps +1) \n"
         "  F6 - Duffing Map                     Z - Show Mandelbrot Half-steps\n"
         "  F7 - Ikeda Map                       N - Use cyclic colors (each N adds another color, shift-N removes one)\n"
-        "  F8 - Chirikov Map                    B - Drag and draw lines. Ctrl-B connects to previous point. Shift-B erases.\n"
-        "  F9 - Burning Ship\n"
+        "  F8 - Chirikov Map                    P - Draw cyclic iterations (each N skips +1 step, shift-N -1)\n"
+        "  F9 - Burning Ship                    B - Drag and draw lines. Ctrl-B connects to previous point. Shift-B erases.\n"
       );
       helpMenu.setPosition(20.0f, 20.0f);
       window.draw(helpMenu);
