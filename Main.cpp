@@ -48,7 +48,7 @@ static int graphics_iters = 1000;
 static int frame = 0;
 static bool mute = true;
 static bool drawIterPoints = false;
-static bool freezeOrbit = true, drawFreezeIndex = false;
+static bool freezeOrbit = true, drawFreezeIndex = false, drawHole;
 
 //Fractal abstraction definition
 typedef void (*Fractal)(double&, double&, double, double);
@@ -77,6 +77,22 @@ int PtYToScreen(double py) {
 }
 
 //All fractal equations
+void mandelbrot_hole(double& x, double& y, double cx, double cy) {
+  //H-H^2=C
+  std::complex<double> one(1, 0);
+  std::complex<double> two(2, 0);
+  std::complex<double> four(4, 0);
+  std::complex<double> C(cx, cy);
+  std::complex<double> hole= (one - std::sqrt(one - four * C))/(two);
+  x = hole.real();
+  y = hole.imag();
+  /*
+   //(-1 - std::sqrt(1-4*D))/2
+  double nx = cx * cx - cy * cy;
+  double ny = 2.0 * cx * cy;
+  x = cx - nx;
+  y = cy - ny;*/
+}
 void mandelbrot(double& x, double& y, double cx, double cy) {
   double nx = x*x - y*y + cx;
   double ny = 2.0*x*y + cy;
@@ -983,6 +999,8 @@ int main(int argc, char *argv[]) {
           showHelpMenu = !showHelpMenu;
         } else if (keycode == sf::Keyboard::L) {
           hide_label = !hide_label;
+        } else if (keycode == sf::Keyboard::V) {
+          drawHole = !drawHole;
         } else if (keycode == sf::Keyboard::E) {
           draw_exponential_orbit = !draw_exponential_orbit;
         } else if (keycode == sf::Keyboard::Space) {
@@ -1275,6 +1293,24 @@ int main(int argc, char *argv[]) {
         glVertex2i(sx, sy);
         glEnd();
 
+        //Draw the hole point
+        if (drawHole)
+        {
+          double holeX, holeY;
+          mandelbrot_hole(holeX, holeY, cx, cy);
+          PtToScreen(holeX, holeY, sx, sy);
+          glPointSize(8.0f);
+          glBegin(GL_POINTS);
+          glColor3f(1, 0, 0);
+          glVertex2i(sx, sy);
+          glEnd();
+          glPointSize(4.0f);
+          glBegin(GL_POINTS);
+          glColor3f(1, 1, 1);
+          glVertex2i(sx, sy);
+          glEnd();
+        }
+
         //Draw highlighted point
         if (drawFreezeIndex)
         {
@@ -1377,10 +1413,10 @@ int main(int argc, char *argv[]) {
         "  R - Reset View                        Spacebar - Animate/pause current orbit (showing next 200 steps).\n"
         "       # - Load View                  Left/Right - Highlight next point (when paused) ctrl:3x, shift:30x - Down ends\n"
         "  Ctrl-# - Save View                           F - Step current orbit when paused(next 10 steps, ctrl:1, shift:100)\n"
-        "  ` - Repeat Point                  Ctrl-Numpad# - Save Point\n"  
-        "  J - Hold down, move mouse, and         Numpad# - Load Point\n"
-        "      release to make Julia sets.    (Drag mouse from top-left corner to top-right corner to blend #1 => #2)\n"
-        "      Press again to switch back.\n"
+        "  ` - Repeat Point                  Ctrl-Numpad# - Save Point, Numpad# - Load Point\n"  
+        "  J - Hold down, move mouse, and      (Drag mouse from top-left corner to top-right corner to blend #1 => #2)   \n"
+        "      release to make Julia sets.    \n"
+        "      Press again to switch back       V - Draw the hole.\n"
         "  F1 - Mandelbrot Set                  Z - Toggle Showing Mandelbrot half-steps.\n"
         "  F2 - Dumb Mandelbrot                 G - Cycle grid drawing states\n"
         "  F3 - Feather Fractal                 L - Toggle labels\n"
