@@ -1239,11 +1239,15 @@ int main(int argc, char *argv[]) {
     }
     else
     {
+      double holeX, holeY;
+      mandelbrot_hole(holeX, holeY, px, py);
+      std::complex<double> iHole(px, py);
+      iHole = iHole - (iHole * iHole);
+
       //Draw the orbit
       if (!hide_orbit) {
         double cx = (hasJulia ? jx : px);
         double cy = (hasJulia ? jy : py);
-
 
         //Draw the lines
         double hx = -50, hy = -50;//highlight point, default out of sight
@@ -1305,12 +1309,22 @@ int main(int argc, char *argv[]) {
         //Draw the hole point
         if (drawHole)
         {
-          double holeX, holeY;
-          mandelbrot_hole(holeX, holeY, cx, cy);
           PtToScreen(holeX, holeY, sx, sy);
           glPointSize(8.0f);
           glBegin(GL_POINTS);
           glColor3f(1, 0, 0);
+          glVertex2i(sx, sy);
+          glEnd();
+          glPointSize(4.0f);
+          glBegin(GL_POINTS);
+          glColor3f(1, 1, 1);
+          glVertex2i(sx, sy);
+          glEnd();
+
+          PtToScreen(iHole.real(), iHole.imag(), sx, sy);
+          glPointSize(8.0f);
+          glBegin(GL_POINTS);
+          glColor3f(0, 1, 0);
           glVertex2i(sx, sy);
           glEnd();
           glPointSize(4.0f);
@@ -1372,7 +1386,8 @@ int main(int argc, char *argv[]) {
 
         orbit_stepText.setString(
           "(" + std::to_string(cTheta) + "°, " + std::to_string(cRadius) + ")\n" +
-          "(" + std::to_string(mTheta) + "°, " + std::to_string(mRadius) + ")");
+          "(" + std::to_string(mTheta) + "°, " + std::to_string(mRadius) + ")\n" + 
+          "Hole - C = " + std::to_string(std::hypot(holeX-px, holeY-py)));
         orbit_stepText.setPosition(window_w / 2 + 10.0f, 5.0f);
         window.draw(orbit_stepText);
         window.popGLStates();
