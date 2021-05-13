@@ -13,11 +13,13 @@
 #define FLAG_DRAW_MSET ((iFlags & 0x01) == 0x01)
 #define FLAG_DRAW_JSET ((iFlags & 0x02) == 0x02)
 #define FLAG_USE_COLOR ((iFlags & 0x04) == 0x04)
+#define FLAG_DECARDIOID ((iFlags & 0x08) == 0x08)
 
 uniform vec2 iResolution;
 uniform vec2 iCam;
 uniform vec2 iJulia;
 uniform float iZoom;
+uniform float iDecardioid;
 uniform int iType;
 uniform int iIters;
 uniform int iFlags;
@@ -106,6 +108,12 @@ VEC2 chirikov(VEC2 z, VEC2 c) {
   }
 #endif
 
+VEC2 decardioidify(VEC2 p, float f)
+{
+  return (1-f)*p - cx_sqr(f*p);
+}
+
+
 vec3 fractal(VEC2 z, VEC2 c) {
   VEC2 pz = z;
   VEC3 sumz = VEC3(0.0, 0.0, 0.0);
@@ -161,6 +169,10 @@ void main() {
   for (int i = 0; i < AA_LEVEL; ++i) {
     vec2 dxy = vec2(rand(i*0.54321 + iTime), rand(i*0.12345 + iTime));
     VEC2 c = VEC2((screen_pos + dxy) * vec2(1.0, -1.0) / iZoom - iCam);
+    
+    if(FLAG_DECARDIOID){
+      c = decardioidify(c, iDecardioid);
+    }
 
     if (FLAG_DRAW_MSET) {
       col += fractal(c, c);

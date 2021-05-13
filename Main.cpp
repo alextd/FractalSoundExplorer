@@ -36,7 +36,7 @@ static int cam_y_fp = 0;
 static double cam_x_dest = cam_x;
 static double cam_y_dest = cam_y;
 static double cam_zoom_dest = cam_zoom;
-static bool sustain = true;
+static bool sustain = false;
 static bool normalized = true;
 static bool use_color = false;
 static bool hide_orbit = true;
@@ -104,6 +104,13 @@ void complex_square(double& x, double& y) {
   double ny = 2.0 * x * y;
   x = nx;
   y = ny;
+}
+void decardioidify(double& x, double& y, double f) {
+  std::complex<double> p(x, y);
+  std::complex<double> p2 = f * p;
+  p = (1-f) * p - p2 * p2;
+  x = p.real();
+  y = p.imag();
 }
 void mandelbrot2(double& x, double& y, double cx, double cy) {
   x += cx; y += cy;
@@ -663,14 +670,20 @@ void SetFractal(sf::Shader& shader, int type, Synth& synth) {
 }
 
 //Starting point, C
-double px, py, cTheta, cRadius, orbit_x = 0, orbit_y = 0;
+double px, py, clickx, clicky, cTheta, cRadius, orbit_x = 0, orbit_y = 0;
 int orbit_step = 0;
 int highlight_index = 0;
-std::string cAsString;
+bool draw_decardioid;
+double decardioid_amount = 0.5;
+std::string cAsString, clickAsString;
 
 //Start the process at px,py.
 void StartPoint(Synth& synth)
 {
+  PtToString(clickx, clicky, clickAsString);
+  px = clickx; py = clicky;
+  if (draw_decardioid)
+    decardioidify(px, py, decardioid_amount);
   hide_orbit = false;
   if (!mute) synth.SetPoint(px, py);
   orbit_x = px;
@@ -689,19 +702,19 @@ double mTheta, mRadius;
 double x_save[10] = { 0 }, y_save[10] = { 0 };
 void SavePoint(int state)
 {
-  x_save[state] = px;
-  y_save[state] = py;
+  x_save[state] = clickx;
+  y_save[state] = clicky;
 }
 void LoadPoint(int state, Synth& synth)
 {
-  px = x_save[state];
-  py = y_save[state];
+  clickx = x_save[state];
+  clicky = y_save[state];
   StartPoint(synth);
 }
 void SliderPoint(double slider)
 {
-  px = x_save[1] * (1 - slider) + x_save[2] * slider;
-  py = y_save[1] * (1 - slider) + y_save[2] * slider;
+  clickx = x_save[1] * (1 - slider) + x_save[2] * slider;
+  clicky = y_save[1] * (1 - slider) + y_save[2] * slider;
 }
 
 //Start point based on click point
@@ -711,15 +724,24 @@ void StartScreenPoint(Synth& synth, int sx, int sy)
     SliderPoint(1.0 * sx / (window_w - 1)); //pixel 0-1979 -> 0-1
   else if (window_h - sy < 10)//BOTTOM of screen
   {
-    double theta = M_PI * ((sx+1.0) / (window_w)); //this goes from 1 - window_w instead of 0-window_ so that we get a divisible by 1920 number
-    double tx, ty, htx, hty;
-    PolarToPt(theta, .5, tx, ty);
-    htx = tx; hty = ty;
-    complex_square(htx, hty);
-    px = tx - htx; py = ty - hty;
+    if (draw_decardioid)
+    {
+      decardioid_amount = 1.0 * sx / (window_w - 1);
+      frame = 0;
+      return;
+    }
+    else
+    {
+      double theta = M_PI * ((sx + 1.0) / (window_w)); //this goes from 1 - window_w instead of 0-window_ so that we get a divisible by 1920 number
+      double tx, ty, htx, hty;
+      PolarToPt(theta, .5, tx, ty);
+      htx = tx; hty = ty;
+      complex_square(htx, hty);
+      clickx = tx - htx; clicky = ty - hty;
+    }
   }
   else
-    ScreenToPt(sx, sy, px, py);
+    ScreenToPt(sx, sy, clickx, clicky);
   StartPoint(synth);
 }
 
@@ -753,8 +775,8 @@ void FinalizeInputCoor(Synth& synth)
 {
   inputting_x = false;
   inputting_y = false;
-  px = input_str_x.empty() ? 0 : std::stod(input_str_x);
-  py = input_str_y.empty() ? 0 : -std::stod(input_str_y);
+  clickx = input_str_x.empty() ? 0 : std::stod(input_str_x);
+  clicky = input_str_y.empty() ? 0 : -std::stod(input_str_y);
   StartPoint(synth);
 }
 void InputPointKey(const sf::Keyboard::Key key)
@@ -873,7 +895,7 @@ int main(int argc, char *argv[]) {
 
   //Load the fragment shader
   if (!shader.loadFromFile("frag.glsl", sf::Shader::Fragment)) {
-    std::cerr << "Failed to compile fragment shader" << std::endl;
+    std::cout << "Failed to compile fragment shader" << std::endl;
     system("pause");
     return 1;
   }
@@ -911,6 +933,7 @@ int main(int argc, char *argv[]) {
   //Setup the shader
   shader.setUniform("iCam", sf::Vector2f((float)cam_x, (float)cam_y));
   shader.setUniform("iZoom", (float)cam_zoom);
+  shader.setUniform("iDecardioid", (float)decardioid_amount);
   SetFractal(shader, starting_fractal, synth);
 
   //Start the synth
@@ -1053,7 +1076,7 @@ int main(int argc, char *argv[]) {
           double y = orbit_y;
           int numSteps = event.key.control ? 1 : event.key.shift ? 100 : 10;
           for (int i = 0; i < numSteps; ++i) {
-            fractal(x, y, px, py);
+            fractal(x, y, px, py);//should be cx for julia set?
             if (x * x + y * y > escape_radius_sq) {
               break;
             }
@@ -1081,6 +1104,9 @@ int main(int argc, char *argv[]) {
             if (draw_cycle < 1) draw_cycle = 1;
           }
           else draw_cycle++;
+        } else if (keycode == sf::Keyboard::I) {
+          draw_decardioid = !draw_decardioid;
+          frame = 0;
         } else if (keycode == sf::Keyboard::P) {
           drawIterPoints = !drawIterPoints;
         } else if (keycode == sf::Keyboard::B) {
@@ -1175,13 +1201,14 @@ int main(int argc, char *argv[]) {
     const bool hasJulia = (jx < 1e8);
     const bool drawMset = (juliaDrag || !hasJulia);
     const bool drawJset = (juliaDrag || hasJulia);
-    const int flags = (drawMset ? 0x01 : 0) | (drawJset ? 0x02 : 0) | (use_color ? 0x04 : 0);
+    const int flags = (drawMset ? 0x01 : 0) | (drawJset ? 0x02 : 0) | (use_color ? 0x04 : 0) | (draw_decardioid ? 0x08 : 0);
 
     //Set the shader parameters
     const sf::Glsl::Vec2 window_res((float)window_w, (float)window_h);
     shader.setUniform("iResolution", window_res);
     shader.setUniform("iCam", sf::Vector2f((float)cam_x, (float)cam_y));
     shader.setUniform("iZoom", (float)cam_zoom);
+    shader.setUniform("iDecardioid", (float)decardioid_amount);
     shader.setUniform("iFlags", flags);
     shader.setUniform("iJulia", sf::Vector2f((float)jx, (float)jy));
     shader.setUniform("iIters", graphics_iters);
@@ -1239,6 +1266,9 @@ int main(int argc, char *argv[]) {
     }
     else
     {
+      double cx = (hasJulia ? jx : px);
+      double cy = (hasJulia ? jy : py);
+
       double holeX, holeY;
       mandelbrot_hole(holeX, holeY, px, py);
       std::complex<double> iHole(px, py);
@@ -1246,9 +1276,6 @@ int main(int argc, char *argv[]) {
 
       //Draw the orbit
       if (!hide_orbit) {
-        double cx = (hasJulia ? jx : px);
-        double cy = (hasJulia ? jy : py);
-
         //Draw the lines
         double hx = -50, hy = -50;//highlight point, default out of sight
 
@@ -1305,6 +1332,21 @@ int main(int argc, char *argv[]) {
         glColor3f(0, 1, 1);
         glVertex2i(sx, sy);
         glEnd();
+
+        if (draw_decardioid)
+        {
+          PtToScreen(clickx, clicky, sx, sy);
+          glPointSize(8.0f);
+          glBegin(GL_POINTS);
+          glColor3f(1, 1, 0);
+          glVertex2i(sx, sy);
+          glEnd();
+          glPointSize(4.0f);
+          glBegin(GL_POINTS);
+          glColor3f(1, 1, 1);
+          glVertex2i(sx, sy);
+          glEnd();
+        }
 
         //Draw the hole point
         if (drawHole)
@@ -1372,7 +1414,7 @@ int main(int argc, char *argv[]) {
         orbit_stepText.setFillColor(sf::Color::White);
 
         sf::RectangleShape dimRect(sf::Vector2f((float)window_w,
-          10 + 3 * font.getLineSpacing(24)));
+          10 + 4 * font.getLineSpacing(24)));
         dimRect.setFillColor(sf::Color(0, 0, 0, 128));
         window.draw(dimRect, sf::RenderStates(BlendAlpha));
 
@@ -1380,6 +1422,7 @@ int main(int argc, char *argv[]) {
         orbit_stepText.setPosition(20.0f, 5.0f);
         orbit_stepText.setString(
           "C = " + cAsString + "\n" +
+          "Click: " + clickAsString + "\n" +
           "Mouse: " + mouseAsString + "\n" +
           "Step: " + std::to_string(orbit_step) + "\tMax Iterations: " + std::to_string(orbit_iters) + "/" + std::to_string(graphics_iters));
         window.draw(orbit_stepText);
@@ -1411,7 +1454,10 @@ int main(int argc, char *argv[]) {
         }
         else
         {
-          PtToScreen(bPoint.x, bPoint.y, sx, sy);
+          double bx = bPoint.x, by = bPoint.y;
+          if (draw_decardioid)
+            decardioidify(bx, by, decardioid_amount);
+          PtToScreen(bx, by, sx, sy);
           glVertex2i(sx, sy);
         }
       }
@@ -1450,6 +1496,7 @@ int main(int argc, char *argv[]) {
         "  F7 - Ikeda Map                       N - Use cyclic colors (each N adds another color, shift-N removes one)\n"
         "  F8 - Chirikov Map                    P - Draw cyclic iterations (each N skips +1 step, shift-N -1)\n"
         "  F9 - Burning Ship                    B - Drag and draw lines. Ctrl-B connects to previous point. Shift-B erases.\n"
+        "   I - decardioidify starting point"
       );
       helpMenu.setPosition(20.0f, 20.0f);
       window.draw(helpMenu);
