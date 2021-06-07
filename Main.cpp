@@ -6,6 +6,7 @@
 #include <iostream>
 #include <complex>
 #include <math.h>
+#include <cmath>
 #include <fstream>
 #include <iomanip>
 #include <filesystem>
@@ -203,7 +204,7 @@ void PolarToPt(double theta, double radius, double& x, double& y)
 
 //Grid-drawing
 
-static enum class GridType { None, Points, Grid, Polar, PolarFocus, Count } draw_grid = GridType::Points;
+static enum class GridType { None, Points, Grid, Polar, PolarFocus, Count } draw_grid;
 double polarGridTheta, polarGridRadius;
 
 inline GridType& operator++(enum GridType& state, int) {
@@ -673,16 +674,24 @@ void SetFractal(sf::Shader& shader, int type, Synth& synth) {
 double px, py, clickx, clicky, cTheta, cRadius, orbit_x = 0, orbit_y = 0;
 int orbit_step = 0;
 int highlight_index = 0;
-bool draw_decardioid;
-double decardioid_amount = 0.5;
+double decardioid_amount = 0;
 std::string cAsString, clickAsString;
+
+
+static enum class BottomScrollingType{ Edge,Decard, DecardHalf, Brush, Count } bottom_scroll_type;
+
+inline BottomScrollingType& operator++(enum BottomScrollingType& state, int) {
+  const int i = static_cast<int>(state) + 1;
+  state = static_cast<BottomScrollingType>((i) % static_cast<int>(BottomScrollingType::Count));
+  return state;
+}
 
 //Start the process at px,py.
 void StartPoint(Synth& synth)
 {
   PtToString(clickx, clicky, clickAsString);
   px = clickx; py = clicky;
-  if (draw_decardioid)
+  if (bottom_scroll_type == BottomScrollingType::Decard || bottom_scroll_type == BottomScrollingType::DecardHalf)
     decardioidify(px, py, decardioid_amount);
   hide_orbit = false;
   if (!mute) synth.SetPoint(px, py);
@@ -697,6 +706,9 @@ void StartPoint(Synth& synth)
 //Mouse Point to print
 std::string mouseAsString;
 double mTheta, mRadius;
+
+//Brush points
+std::vector< sf::Vector2<double>>brushPoints;
 
 //Save the Starting Point
 double x_save[10] = { 0 }, y_save[10] = { 0 };
@@ -718,30 +730,73 @@ void SliderPoint(double slider)
 }
 
 //Start point based on click point
+double lerp(double a, double b, double f)
+{
+  return (a * (1.0 - f)) + (b * f);
+}
 void StartScreenPoint(Synth& synth, int sx, int sy)
 {
+  //set clickx,clicky
   if (sy < 10 )//Top of screen
     SliderPoint(1.0 * sx / (window_w - 1)); //pixel 0-1979 -> 0-1
   else if (window_h - sy < 10)//BOTTOM of screen
   {
-    if (draw_decardioid)
+    switch (bottom_scroll_type)
     {
-      decardioid_amount = 1.0 * sx / (window_w - 1);
-      frame = 0;
-      return;
-    }
-    else
-    {
-      double theta = M_PI * ((sx + 1.0) / (window_w)); //this goes from 1 - window_w instead of 0-window_ so that we get a divisible by 1920 number
-      double tx, ty, htx, hty;
-      PolarToPt(theta, .5, tx, ty);
-      htx = tx; hty = ty;
-      complex_square(htx, hty);
-      clickx = tx - htx; clicky = ty - hty;
+      case BottomScrollingType::Decard:
+      {
+        decardioid_amount = 1.0 * sx / (window_w - 1);
+        frame = 0;
+
+        //doesn't change clickpoint so return here
+        return;
+      }
+      case BottomScrollingType::DecardHalf:
+      {
+        decardioid_amount = 0.5 * sx / (window_w - 1);
+        frame = 0;
+
+        //doesn't change clickpoint so return here
+        return;
+      }
+      case BottomScrollingType::Edge:
+      {
+        double theta = M_PI * ((sx + 1.0) / (window_w)); //this goes from 1 - window_w instead of 0-window_ so that we get a divisible by 1920 number
+        double tx, ty, htx, hty;
+        PolarToPt(theta, .5, tx, ty);
+        htx = tx; hty = ty;
+        complex_square(htx, hty);
+        clickx = tx - htx; clicky = ty - hty;
+        break;
+      }
+      case BottomScrollingType::Brush:
+      {
+        if (brushPoints.empty())  return;//Nothing to do!
+        int bCount = static_cast<int>(brushPoints.size());
+        //TODO filter out x == std::numeric_limits<double>::max()
+
+        double desired = (1.0f* (bCount-1) * sx) / (window_w - 1);
+        int index = (int)desired;
+        double lerpAmount = desired - index;
+
+        if (index == bCount - 1)
+        {
+          clickx = brushPoints[index].x;
+          clicky = brushPoints[index].y;
+        }
+        else
+        {
+          clickx = lerp(brushPoints[index].x, brushPoints[index + 1].x, lerpAmount);
+          clicky = lerp(brushPoints[index].y, brushPoints[index + 1].y, lerpAmount);
+        }
+        break;
+      }
     }
   }
   else
     ScreenToPt(sx, sy, clickx, clicky);
+  
+  //clickpoint is set, use it:
   StartPoint(synth);
 }
 
@@ -947,7 +1002,6 @@ int main(int argc, char *argv[]) {
   bool takeScreenshot = false;
   std::string shot_filename;
   bool showHelpMenu = false;
-  std::vector< sf::Vector2<double>>brushPoints;
 
   sf::Vector2i prevDrag;
   while (window.isOpen()) {
@@ -1105,8 +1159,8 @@ int main(int argc, char *argv[]) {
           }
           else draw_cycle++;
         } else if (keycode == sf::Keyboard::I) {
-          draw_decardioid = !draw_decardioid;
-          frame = 0;
+          bottom_scroll_type++;
+          frame = 0;// in case it was decardioid
         } else if (keycode == sf::Keyboard::P) {
           drawIterPoints = !drawIterPoints;
         } else if (keycode == sf::Keyboard::B) {
@@ -1201,7 +1255,9 @@ int main(int argc, char *argv[]) {
     const bool hasJulia = (jx < 1e8);
     const bool drawMset = (juliaDrag || !hasJulia);
     const bool drawJset = (juliaDrag || hasJulia);
-    const int flags = (drawMset ? 0x01 : 0) | (drawJset ? 0x02 : 0) | (use_color ? 0x04 : 0) | (draw_decardioid ? 0x08 : 0);
+    const int flags = (drawMset ? 0x01 : 0) | (drawJset ? 0x02 : 0) | (use_color ? 0x04 : 0)
+      | (bottom_scroll_type == BottomScrollingType::Decard ? 0x08 : 0)
+      | (bottom_scroll_type == BottomScrollingType::DecardHalf ? 0x08 : 0);
 
     //Set the shader parameters
     const sf::Glsl::Vec2 window_res((float)window_w, (float)window_h);
@@ -1333,7 +1389,7 @@ int main(int argc, char *argv[]) {
         glVertex2i(sx, sy);
         glEnd();
 
-        if (draw_decardioid)
+        if (bottom_scroll_type == BottomScrollingType::Decard || bottom_scroll_type == BottomScrollingType::DecardHalf)
         {
           PtToScreen(clickx, clicky, sx, sy);
           glPointSize(8.0f);
@@ -1455,7 +1511,7 @@ int main(int argc, char *argv[]) {
         else
         {
           double bx = bPoint.x, by = bPoint.y;
-          if (draw_decardioid)
+          if (bottom_scroll_type == BottomScrollingType::Decard || bottom_scroll_type == BottomScrollingType::DecardHalf)
             decardioidify(bx, by, decardioid_amount);
           PtToScreen(bx, by, sx, sy);
           glVertex2i(sx, sy);
@@ -1496,7 +1552,7 @@ int main(int argc, char *argv[]) {
         "  F7 - Ikeda Map                       N - Use cyclic colors (each N adds another color, shift-N removes one)\n"
         "  F8 - Chirikov Map                    P - Draw cyclic iterations (each N skips +1 step, shift-N -1)\n"
         "  F9 - Burning Ship                    B - Drag and draw lines. Ctrl-B connects to previous point. Shift-B erases.\n"
-        "   I - decardioidify starting point"
+        "   I - Toggle bottom-edge slider mode: C=Cardioid Edge, Decardioid amount, C=Brush"
       );
       helpMenu.setPosition(20.0f, 20.0f);
       window.draw(helpMenu);
