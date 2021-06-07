@@ -771,9 +771,11 @@ void StartScreenPoint(Synth& synth, int sx, int sy)
       }
       case BottomScrollingType::Brush:
       {
-        if (brushPoints.empty())  return;//Nothing to do!
-        int bCount = static_cast<int>(brushPoints.size());
-        //TODO filter out x == std::numeric_limits<double>::max()
+
+        std::vector< sf::Vector2<double>> usablePoints;
+        std::copy_if(brushPoints.begin(), brushPoints.end(), std::back_inserter(usablePoints), [](auto bp) {return bp.x != std::numeric_limits<double>::max(); });
+        if (usablePoints.empty())  return;//Nothing to do!
+        int bCount = static_cast<int>(usablePoints.size());
 
         double desired = (1.0f* (bCount-1) * sx) / (window_w - 1);
         int index = (int)desired;
@@ -781,13 +783,13 @@ void StartScreenPoint(Synth& synth, int sx, int sy)
 
         if (index == bCount - 1)
         {
-          clickx = brushPoints[index].x;
-          clicky = brushPoints[index].y;
+          clickx = usablePoints[index].x;
+          clicky = usablePoints[index].y;
         }
         else
         {
-          clickx = lerp(brushPoints[index].x, brushPoints[index + 1].x, lerpAmount);
-          clicky = lerp(brushPoints[index].y, brushPoints[index + 1].y, lerpAmount);
+          clickx = lerp(usablePoints[index].x, usablePoints[index + 1].x, lerpAmount);
+          clicky = lerp(usablePoints[index].y, usablePoints[index + 1].y, lerpAmount);
         }
         break;
       }
