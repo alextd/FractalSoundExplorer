@@ -138,14 +138,14 @@ vec3 fractal(VEC2 z, VEC2 c) {
     }
     else
     {
-      float n1 = sin(float(i) * 0.1) * 0.5 + 0.5;
-      float n2 = cos(float(i) * 0.1) * 0.5 + 0.5;
-      return vec3(n1, n2, 1.0) * (1.0 - float(FLAG_USE_COLOR)*0.85);
+      float n1 = sin(float(i) * 0.1 + PI/4) * 0.25 + 0.6;
+      float n2 = cos(float(i) * 0.1 + PI/4) * 0.25 + 0.6;
+      return vec3(00, n2, n1);
     } 
   } 
   else if (FLAG_USE_COLOR) {
   
-    return vec3(.2,.2,.2);
+    return vec3(0,0,0);
     /*
     sumz = abs(sumz) / iIters;
     vec3 n1 = sin(abs(sumz * 5.0)) * 0.45 + 0.5;

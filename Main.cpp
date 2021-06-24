@@ -673,7 +673,9 @@ void SetFractal(sf::Shader& shader, int type, Synth& synth) {
 //Starting point, C
 double px, py, clickx, clicky, cTheta, cRadius, orbit_x = 0, orbit_y = 0;
 int orbit_step = 0;
-int highlight_index = 0;
+int highlight_index = 0; 
+bool findFreezeIndex;
+double findx, findy;
 double decardioid_amount = 0;
 std::string cAsString, clickAsString;
 
@@ -712,6 +714,8 @@ std::vector< sf::Vector2<double>>brushPoints;
 
 //Save the Starting Point
 double x_save[10] = { 0 }, y_save[10] = { 0 };
+double slid_lerp;
+bool started_slid;
 void SavePoint(int state)
 {
   x_save[state] = clickx;
@@ -725,8 +729,32 @@ void LoadPoint(int state, Synth& synth)
 }
 void SliderPoint(double slider)
 {
+  started_slid = true;
+  slid_lerp = slider;
   clickx = x_save[1] * (1 - slider) + x_save[2] * slider;
   clicky = y_save[1] * (1 - slider) + y_save[2] * slider;
+}
+void DrawBrushPoints()
+{
+  glBegin(GL_LINE_STRIP);
+  int sx, sy;
+  for (auto&& bPoint : brushPoints)
+  {
+    if (bPoint.x == std::numeric_limits<double>::max())
+    {
+      glEnd();
+      glBegin(GL_LINE_STRIP);
+    }
+    else
+    {
+      double bx = bPoint.x, by = bPoint.y;
+      if (bottom_scroll_type == BottomScrollingType::Decard || bottom_scroll_type == BottomScrollingType::DecardHalf)
+        decardioidify(bx, by, decardioid_amount);
+      PtToScreen(bx, by, sx, sy);
+      glVertex2i(sx, sy);
+    }
+  }
+  glEnd();
 }
 
 //Start point based on click point
@@ -736,6 +764,7 @@ double lerp(double a, double b, double f)
 }
 void StartScreenPoint(Synth& synth, int sx, int sy)
 {
+  started_slid = false;
   //set clickx,clicky
   if (sy < 10 )//Top of screen
     SliderPoint(1.0 * sx / (window_w - 1)); //pixel 0-1979 -> 0-1
@@ -828,12 +857,20 @@ void StartInputPoint()
   inputting_x = true;
   inputting_y = false;
 }
-void FinalizeInputCoor(Synth& synth)
+void FinalizeInputCoor(sf::Event& event, Synth& synth)
 {
   inputting_x = false;
   inputting_y = false;
-  clickx = input_str_x.empty() ? 0 : std::stod(input_str_x);
-  clicky = input_str_y.empty() ? 0 : -std::stod(input_str_y);
+  double x = input_str_x.empty() ? 0 : std::stod(input_str_x);
+  double y = input_str_y.empty() ? 0 : -std::stod(input_str_y);
+  if (event.key.shift)
+  {
+    jx = x; jy = y;
+  }
+  else
+  {
+    clickx = x; clicky = y;
+  }
   StartPoint(synth);
 }
 void InputPointKey(const sf::Keyboard::Key key)
@@ -1019,7 +1056,7 @@ int main(int argc, char *argv[]) {
         if (inputting_x || inputting_y)
         {
           if (keycode == sf::Keyboard::Enter)
-            FinalizeInputCoor(synth);
+            FinalizeInputCoor(event, synth);
           else
             InputPointKey(keycode);
         }
@@ -1119,6 +1156,11 @@ int main(int argc, char *argv[]) {
         } else if (keycode == sf::Keyboard::Down) {
           drawFreezeIndex = false;
           highlight_index = 0;
+        } else if (keycode == sf::Keyboard::Up) {
+          findFreezeIndex = true;
+
+          const sf::Vector2i mouse_pos = sf::Mouse::getPosition(window);
+          ScreenToPt(mouse_pos.x, mouse_pos.y, findx, findy);
         } else if (keycode == sf::Keyboard::Left) {
           drawFreezeIndex = true;
           highlight_index -= event.key.control ? 3 : event.key.shift ? 30 : 1; 
@@ -1149,10 +1191,10 @@ int main(int argc, char *argv[]) {
         } else if (keycode == sf::Keyboard::N) {
           if (event.key.shift)
           {
-            color_cycle--;
+            color_cycle -= event.key.control ? 10 : 1;
             if (color_cycle < 1) color_cycle = 1;
           }
-          else color_cycle++;
+          else color_cycle += event.key.control ? 10 : 1;
         } else if (keycode == sf::Keyboard::O) {
           if (event.key.shift)
           {
@@ -1336,6 +1378,7 @@ int main(int argc, char *argv[]) {
       if (!hide_orbit) {
         //Draw the lines
         double hx = -50, hy = -50;//highlight point, default out of sight
+        double findr = 100;
 
         glLineWidth(2.0f);
         glPointSize(5.0f);
@@ -1366,6 +1409,15 @@ int main(int argc, char *argv[]) {
           {
             hx = x; hy = y;
           }
+          if (findFreezeIndex)
+          {
+            double newr = (findx - x) * (findx - x) + (findy - y) * (findy - y);
+            if (newr < findr)
+            {
+              findr = newr;
+              highlight_index = i + 1;
+            }
+          }
 
           if (x * x + y * y > escape_radius_sq) {
             break;
@@ -1377,6 +1429,7 @@ int main(int argc, char *argv[]) {
           }
         }
         glEnd();
+        findFreezeIndex = false;
 
         //Draw the starting point
         glPointSize(8.0f);
@@ -1488,7 +1541,8 @@ int main(int argc, char *argv[]) {
         orbit_stepText.setString(
           "(" + std::to_string(cTheta) + "°, " + std::to_string(cRadius) + ")\n" +
           "(" + std::to_string(mTheta) + "°, " + std::to_string(mRadius) + ")\n" + 
-          "Hole - C = " + std::to_string(std::hypot(holeX-px, holeY-py)));
+          "Highlight: " + std::to_string(highlight_index) + ", Colors: " + std::to_string(color_cycle) + "\n" + 
+          "Hole - C = " + std::to_string(std::hypot(holeX - px, holeY - py)));
         orbit_stepText.setPosition(window_w / 2 + 10.0f, 5.0f);
         window.draw(orbit_stepText);
         window.popGLStates();
@@ -1500,25 +1554,28 @@ int main(int argc, char *argv[]) {
     //Draw brush stroke
     if (!brushPoints.empty())
     {
+      glLineWidth(4.0f);
+      glColor3f(0,0,0);
+      DrawBrushPoints();
+      glLineWidth(2.0f);
       glColor3f(1, 1, 1);
-      glBegin(GL_LINE_STRIP);
-      int sx, sy;
-      for (auto&& bPoint : brushPoints)
-      {
-        if (bPoint.x == std::numeric_limits<double>::max())
-        {
-          glEnd();
-          glBegin(GL_LINE_STRIP);
-        }
-        else
-        {
-          double bx = bPoint.x, by = bPoint.y;
-          if (bottom_scroll_type == BottomScrollingType::Decard || bottom_scroll_type == BottomScrollingType::DecardHalf)
-            decardioidify(bx, by, decardioid_amount);
-          PtToScreen(bx, by, sx, sy);
-          glVertex2i(sx, sy);
-        }
-      }
+      DrawBrushPoints();
+    }
+
+    if (started_slid)
+    {
+      int sx = (int)(slid_lerp * window_w);
+      glLineWidth(3.0f);
+      glColor3f(0, 0, 0);
+      glBegin(GL_LINES);
+      glVertex2i(sx, 0);
+      glVertex2i(sx, 5);
+      glEnd();
+      glLineWidth(1.0f);
+      glColor3f(1, 1, 1);
+      glBegin(GL_LINES);
+      glVertex2i(sx, 0);
+      glVertex2i(sx, 5);
       glEnd();
     }
     
