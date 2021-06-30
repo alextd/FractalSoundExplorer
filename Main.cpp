@@ -1110,7 +1110,10 @@ int main(int argc, char *argv[]) {
         } else if (keycode == sf::Keyboard::J) {
           if (jx < 1e8) {
             jx = jy = 1e8;
-          } else {
+          } else if(event.key.shift) {
+            jx = px; jy = py;
+          }
+          else {
             juliaDrag = true;
             const sf::Vector2i mousePos = sf::Mouse::getPosition(window);
             ScreenToPt(mousePos.x, mousePos.y, jx, jy);
@@ -1173,8 +1176,10 @@ int main(int argc, char *argv[]) {
           double x = orbit_x;
           double y = orbit_y;
           int numSteps = event.key.control ? 1 : event.key.shift ? 100 : 10;
+          double cx = ((jx < 1e8) ? jx : px);
+          double cy = ((jx < 1e8) ? jy : py);
           for (int i = 0; i < numSteps; ++i) {
-            fractal(x, y, px, py);//should be cx for julia set?
+            fractal(x, y, cx, cy);
             if (x * x + y * y > escape_radius_sq) {
               break;
             }
@@ -1370,8 +1375,8 @@ int main(int argc, char *argv[]) {
       double cy = (hasJulia ? jy : py);
 
       double holeX, holeY;
-      mandelbrot_hole(holeX, holeY, px, py);
-      std::complex<double> iHole(px, py);
+      mandelbrot_hole(holeX, holeY, cx, cy);
+      std::complex<double> iHole(cx, cy);
       iHole = iHole - (iHole * iHole);
 
       //Draw the orbit
