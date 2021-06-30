@@ -138,9 +138,9 @@ vec3 fractal(VEC2 z, VEC2 c) {
     }
     else
     {
-      float n1 = sin(float(i) * 0.1 + PI/4) * 0.25 + 0.6;
-      float n2 = cos(float(i) * 0.1 + PI/4) * 0.25 + 0.6;
-      return vec3(00, n2, n1);
+      float n1 = cos(float(i) * 0.1) * 0.4 + 0.5;
+      float n2 = cos(float(i) * 0.1) * 0.3 + 0.6;
+      return vec3(0, n1, n2);
     } 
   } 
   else if (FLAG_USE_COLOR) {
