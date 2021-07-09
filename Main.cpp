@@ -14,6 +14,7 @@
 #include <functional>
 #include <mutex>
 #include <queue>
+#include "gsl/gsl_poly.h"
 
 //Constants
 static const int target_fps = 24;
@@ -39,7 +40,7 @@ static double cam_y_dest = cam_y;
 static double cam_zoom_dest = cam_zoom;
 static bool sustain = false;
 static bool normalized = true;
-static bool use_color = false;
+static bool use_color = false,use_color2 = false;
 static bool hide_orbit = true;
 static bool hide_label = true;
 static bool draw_exponential_orbit = false;
@@ -49,7 +50,7 @@ static int graphics_iters = 1000;
 static int frame = 0;
 static bool mute = true;
 static bool drawIterPoints = false;
-static bool freezeOrbit = true, drawFreezeIndex = false, drawHole;
+static bool freezeOrbit = true, drawFreezeIndex = false;
 
 //Fractal abstraction definition
 typedef void (*Fractal)(double&, double&, double, double);
@@ -201,6 +202,73 @@ void PolarToPt(double theta, double radius, double& x, double& y)
   x = radius * std::cos(theta);
   y = - radius * std::sin(theta);
 }
+
+//Special Point-Drawing
+static enum class SpecialPointType { None, Hole, HoleReflect, CSqMH, Roots, Count } draw_special;
+int root_exp = 1;
+
+inline SpecialPointType& operator++(enum SpecialPointType& state, int) {
+  const int i = static_cast<int>(state) + 1;
+  state = static_cast<SpecialPointType>((i) % static_cast<int>(SpecialPointType::Count));
+  return state;
+}
+
+
+
+void DrawSpecial(double cx, double cy)
+{
+  int sx, sy;
+  double holeX, holeY;
+  mandelbrot_hole(holeX, holeY, cx, cy);
+  switch (draw_special)
+  {
+  case SpecialPointType::CSqMH:
+  case SpecialPointType::HoleReflect:
+  case SpecialPointType::Hole:
+    //std::complex<double> iHole(cx, cy);
+    //iHole = iHole - (iHole * iHole);
+    PtToScreen(holeX, holeY, sx, sy);
+    glVertex2i(sx, sy);
+    if (draw_special == SpecialPointType::HoleReflect)
+    {
+      PtToScreen(-holeX, -holeY, sx, sy);
+      glVertex2i(sx, sy);
+    }
+
+    if(draw_special == SpecialPointType::CSqMH)
+    {
+      std::complex<double> h(holeX, holeY);
+      std::complex<double> c(cx, cy);
+      std::complex<double> cSqMH = std::sqrt((c - h) * (c - h));
+      PtToScreen(cSqMH.real(), cSqMH.imag(), sx, sy);
+      glVertex2i(sx, sy);
+    }
+    break;
+
+  case SpecialPointType::Roots:
+  {
+    /* coefficients of P(x) =  -1 + x^5  */
+    /*
+    double a[6] = { -1, 0, 0, 0, 0, 1 };
+    double z[10];
+
+    gsl_poly_complex_workspace* w
+      = gsl_poly_complex_workspace_alloc(6);
+
+    gsl_poly_complex_solve(a, 6, w, z);
+
+    gsl_poly_complex_workspace_free(w);
+
+    for (int i = 0; i < 5; i++)
+    {
+      printf("z%d = %+.18f %+.18f\n",
+        i, z[2 * i], z[2 * i + 1]);
+    }*/
+  }
+    break;
+  }
+}
+
 
 //Grid-drawing
 
@@ -680,7 +748,7 @@ double decardioid_amount = 0;
 std::string cAsString, clickAsString;
 
 
-static enum class BottomScrollingType{ Edge,Decard, DecardHalf, Brush, Count } bottom_scroll_type;
+static enum class BottomScrollingType{ Brush, Edge,Decard, DecardHalf, Count } bottom_scroll_type;
 
 inline BottomScrollingType& operator++(enum BottomScrollingType& state, int) {
   const int i = static_cast<int>(state) + 1;
@@ -702,7 +770,8 @@ void StartPoint(Synth& synth)
   orbit_step = 0;
   PtToPolar(px, py, cTheta, cRadius);
   cTheta *= 180 / M_PI;
-  PtToString(px, py, cAsString);
+  if(jx == 1e8)
+    PtToString(px, py, cAsString);
 }
 
 //Mouse Point to print
@@ -1100,7 +1169,15 @@ int main(int argc, char *argv[]) {
             PtToPolar(px, py, polarGridTheta, polarGridRadius);
           }
         } else if (keycode == sf::Keyboard::C) {
-          use_color = !use_color;
+          if (use_color)
+          {
+            use_color = false;
+            use_color2 = true;
+          }
+          else if (use_color2)
+            use_color2 = false;
+          else
+            use_color = true;
           frame = 0;
         } else if (keycode == sf::Keyboard::R) {
           cam_x = cam_x_dest = 0.0;
@@ -1110,13 +1187,18 @@ int main(int argc, char *argv[]) {
         } else if (keycode == sf::Keyboard::J) {
           if (jx < 1e8) {
             jx = jy = 1e8;
-          } else if(event.key.shift) {
-            jx = px; jy = py;
           }
-          else {
-            juliaDrag = true;
-            const sf::Vector2i mousePos = sf::Mouse::getPosition(window);
-            ScreenToPt(mousePos.x, mousePos.y, jx, jy);
+          else
+          {
+            if (event.key.shift) {
+              jx = px; jy = py;
+            }
+            else {
+              juliaDrag = true;
+              const sf::Vector2i mousePos = sf::Mouse::getPosition(window);
+              ScreenToPt(mousePos.x, mousePos.y, jx, jy);
+            }
+            PtToString(jx, jy, cAsString);
           }
           synth.audio_pause = true;
           hide_orbit = true;
@@ -1128,7 +1210,19 @@ int main(int argc, char *argv[]) {
         } else if (keycode == sf::Keyboard::L) {
           hide_label = !hide_label;
         } else if (keycode == sf::Keyboard::V) {
-          drawHole = !drawHole;
+          if (event.key.shift)
+          {
+            draw_special = SpecialPointType::None;
+          }
+          else if(draw_special == SpecialPointType::Roots)
+          {
+            root_exp++;
+          }
+          else
+          {
+            draw_special++;
+            root_exp = 1;
+          }
         } else if (keycode == sf::Keyboard::E) {
           draw_exponential_orbit = !draw_exponential_orbit;
         } else if (keycode == sf::Keyboard::Space) {
@@ -1304,7 +1398,7 @@ int main(int argc, char *argv[]) {
     const bool hasJulia = (jx < 1e8);
     const bool drawMset = (juliaDrag || !hasJulia);
     const bool drawJset = (juliaDrag || hasJulia);
-    const int flags = (drawMset ? 0x01 : 0) | (drawJset ? 0x02 : 0) | (use_color ? 0x04 : 0)
+    const int flags = (drawMset ? 0x01 : 0) | (drawJset ? 0x02 : 0) | (use_color ? 0x04 : 0) | (use_color2 ? 0x10 : 0)
       | (bottom_scroll_type == BottomScrollingType::Decard ? 0x08 : 0)
       | (bottom_scroll_type == BottomScrollingType::DecardHalf ? 0x08 : 0);
 
@@ -1373,11 +1467,7 @@ int main(int argc, char *argv[]) {
     {
       double cx = (hasJulia ? jx : px);
       double cy = (hasJulia ? jy : py);
-
-      double holeX, holeY;
-      mandelbrot_hole(holeX, holeY, cx, cy);
-      std::complex<double> iHole(cx, cy);
-      iHole = iHole - (iHole * iHole);
+      double highlightDelta = 0;
 
       //Draw the orbit
       if (!hide_orbit) {
@@ -1402,6 +1492,7 @@ int main(int argc, char *argv[]) {
 
         int i, exponential_i = 1;
         for (i = 0; i < orbit_iters; ++i) {
+          double lastX = x, lastY = y;
           if (draw_exponential_orbit && (i+1 != exponential_i))
             fractal(x, y, cx, cy);
           else
@@ -1412,6 +1503,7 @@ int main(int argc, char *argv[]) {
 
           if (freezeOrbit && i == highlight_index - 1)
           {
+            highlightDelta = std::sqrt((lastX - x) * (lastX - x) + (lastY - y) * (lastY - y));
             hx = x; hy = y;
           }
           if (findFreezeIndex)
@@ -1465,20 +1557,21 @@ int main(int argc, char *argv[]) {
         }
 
         //Draw the hole point
-        if (drawHole)
+        if (draw_special != SpecialPointType::None)
         {
-          PtToScreen(holeX, holeY, sx, sy);
           glPointSize(8.0f);
           glBegin(GL_POINTS);
           glColor3f(1, 0, 0);
-          glVertex2i(sx, sy);
+          DrawSpecial(cx, cy);
           glEnd();
           glPointSize(4.0f);
           glBegin(GL_POINTS);
           glColor3f(1, 1, 1);
-          glVertex2i(sx, sy);
+          DrawSpecial(cx, cy);
           glEnd();
 
+          /*
+          * I don't really use 'invert hole'
           PtToScreen(iHole.real(), iHole.imag(), sx, sy);
           glPointSize(8.0f);
           glBegin(GL_POINTS);
@@ -1490,6 +1583,7 @@ int main(int argc, char *argv[]) {
           glColor3f(1, 1, 1);
           glVertex2i(sx, sy);
           glEnd();
+          */
         }
 
         //Draw highlighted point
@@ -1542,12 +1636,20 @@ int main(int argc, char *argv[]) {
           "Mouse: " + mouseAsString + "\n" +
           "Step: " + std::to_string(orbit_step) + "\tMax Iterations: " + std::to_string(orbit_iters) + "/" + std::to_string(graphics_iters));
         window.draw(orbit_stepText);
+        
+        std::string hdstr = "?";
+        if (highlightDelta > 0)
+        {
+          std::ostringstream oss;
+          oss << std::setprecision(10) << highlightDelta;
+          hdstr = oss.str();
+        }
 
         orbit_stepText.setString(
           "(" + std::to_string(cTheta) + "°, " + std::to_string(cRadius) + ")\n" +
-          "(" + std::to_string(mTheta) + "°, " + std::to_string(mRadius) + ")\n" + 
-          "Highlight: " + std::to_string(highlight_index) + ", Colors: " + std::to_string(color_cycle) + "\n" + 
-          "Hole - C = " + std::to_string(std::hypot(holeX - px, holeY - py)));
+          "(" + std::to_string(mTheta) + "°, " + std::to_string(mRadius) + ")\n" +
+          "Highlight: " + std::to_string(highlight_index) + ", Colors: " + std::to_string(color_cycle) + "\n" +
+          "Dist from prev: " + hdstr);
         orbit_stepText.setPosition(window_w / 2 + 10.0f, 5.0f);
         window.draw(orbit_stepText);
         window.popGLStates();

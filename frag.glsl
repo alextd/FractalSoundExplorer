@@ -8,12 +8,14 @@
 #define VEC3 vec3
 #define AA_LEVEL 1
 #define ESCAPE 1000.0
+#define ANTI_ESCAPE 0.000001
 #define PI 3.141592653
 
 #define FLAG_DRAW_MSET ((iFlags & 0x01) == 0x01)
 #define FLAG_DRAW_JSET ((iFlags & 0x02) == 0x02)
 #define FLAG_USE_COLOR ((iFlags & 0x04) == 0x04)
 #define FLAG_DECARDIOID ((iFlags & 0x08) == 0x08)
+#define FLAG_USE_COLOR2 ((iFlags & 0x10) == 0x10)
 
 uniform vec2 iResolution;
 uniform vec2 iCam;
@@ -89,7 +91,7 @@ VEC2 chirikov(VEC2 z, VEC2 c) {
   return z;
 }
 
-#if 1
+#if 0
 #define DO_LOOP(name) \
   for (i = 0; i < iIters; ++i) { \
     VEC2 ppz = pz; \
@@ -107,6 +109,12 @@ VEC2 chirikov(VEC2 z, VEC2 c) {
     if (dot(z, z) > ESCAPE) { break; } \
   }
 #endif
+#define DO_LOOP_ANTI(name) \
+  for (i = 0; i < iIters; ++i) { \
+    pz = z; \
+    z = name(z, c); \
+    if (distance (z, pz) < ANTI_ESCAPE) { break; } \
+  }
 
 VEC2 decardioidify(VEC2 p, float f)
 {
@@ -116,18 +124,35 @@ VEC2 decardioidify(VEC2 p, float f)
 
 vec3 fractal(VEC2 z, VEC2 c) {
   VEC2 pz = z;
-  VEC3 sumz = VEC3(0.0, 0.0, 0.0);
+  //VEC3 sumz = VEC3(0.0, 0.0, 0.0);
   int i;
-  switch (iType) {
-    case 0: DO_LOOP(mandelbrot); break;
-    case 1: DO_LOOP(dumb_mandelbrot); break;
-    case 2: DO_LOOP(feather); break;
-    case 3: DO_LOOP(sfx); break;
-    case 4: DO_LOOP(henon); break;
-    case 5: DO_LOOP(duffing); break;
-    case 6: DO_LOOP(ikeda); break;
-    case 7: DO_LOOP(chirikov); break;
-    case 8: DO_LOOP(burning_ship); break;
+  if(FLAG_USE_COLOR2)
+  {
+    switch (iType) {
+      case 0: DO_LOOP_ANTI(mandelbrot); break;
+      case 1: DO_LOOP_ANTI(dumb_mandelbrot); break;
+      case 2: DO_LOOP_ANTI(feather); break;
+      case 3: DO_LOOP_ANTI(sfx); break;
+      case 4: DO_LOOP_ANTI(henon); break;
+      case 5: DO_LOOP_ANTI(duffing); break;
+      case 6: DO_LOOP_ANTI(ikeda); break;
+      case 7: DO_LOOP_ANTI(chirikov); break;
+      case 8: DO_LOOP_ANTI(burning_ship); break;
+    }
+  }
+  else
+  {
+    switch (iType) {
+      case 0: DO_LOOP(mandelbrot); break;
+      case 1: DO_LOOP(dumb_mandelbrot); break;
+      case 2: DO_LOOP(feather); break;
+      case 3: DO_LOOP(sfx); break;
+      case 4: DO_LOOP(henon); break;
+      case 5: DO_LOOP(duffing); break;
+      case 6: DO_LOOP(ikeda); break;
+      case 7: DO_LOOP(chirikov); break;
+      case 8: DO_LOOP(burning_ship); break;
+    }
   }
 
   if (i != iIters) {
@@ -135,6 +160,12 @@ vec3 fractal(VEC2 z, VEC2 c) {
     {
       float n = float(i)/(iIters-1)*0.5f+0.5f;  //white to grey, for island detection
       return vec3(n, n, n);
+    }
+    else if (FLAG_USE_COLOR2)
+    {
+      float n1 = cos(float(i) * 0.1) * 0.4 + 0.5;
+      float n2 = cos(float(i) * 0.1) * 0.3 + 0.6;
+      return vec3(0, n1, n2);
     }
     else
     {
@@ -152,6 +183,10 @@ vec3 fractal(VEC2 z, VEC2 c) {
     return n1;
     */
   } 
+  else if (FLAG_USE_COLOR2) {
+    return vec3(0.0, 0.0, 0.0);
+  }
+  
   else {
     return vec3(0.0, 0.0, 0.0);
   }
