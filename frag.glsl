@@ -8,7 +8,8 @@
 #define VEC3 vec3
 #define AA_LEVEL 1
 #define ESCAPE 1000.0
-#define ANTI_ESCAPE 0.000001
+#define ANTI_ESCAPE_ACTUALLY 0.00001
+#define ANTI_ESCAPE ANTI_ESCAPE_ACTUALLY*ANTI_ESCAPE_ACTUALLY
 #define PI 3.141592653
 
 #define FLAG_DRAW_MSET ((iFlags & 0x01) == 0x01)
@@ -26,6 +27,7 @@ uniform int iType;
 uniform int iIters;
 uniform int iFlags;
 uniform int iTime;
+uniform int iStepsToAnti;
 
 #define cx_one VEC2(1.0, 0.0)
 VEC2 cx_mul(VEC2 a, VEC2 b) {
@@ -45,7 +47,7 @@ VEC2 cx_cube(VEC2 a) {
 }
 VEC2 cx_div(VEC2 a, VEC2 b) {
   FLOAT denom = 1.0 / (b.x*b.x + b.y*b.y);
-  return VEC2(a.x*b.x + a.y*b.y, a.y*b.x - a.x*b.y) * denom;
+  return VEC2(VEC2(a.x*b.x + a.y*b.y, a.y*b.x - a.x*b.y) * denom);
 }
 VEC2 cx_sin(VEC2 a) {
   return VEC2(sin(a.x) * cosh(a.y), cos(a.x) * sinh(a.y));
@@ -80,7 +82,7 @@ VEC2 duffing(VEC2 z, VEC2 c) {
   return VEC2(z.y, -c.y*z.x + c.x*z.y - z.y*z.y*z.y);
 }
 VEC2 ikeda(VEC2 z, VEC2 c) {
-  FLOAT t = 0.4 - 6.0/(1.0 + dot(z,z));
+  float t = float(0.4 - 6.0/(1.0 + dot(z,z)));
   FLOAT st = sin(t);
   FLOAT ct = cos(t);
   return VEC2(1.0 + c.x*(z.x*ct - z.y*st), c.y*(z.x*st + z.y*ct));
@@ -111,9 +113,18 @@ VEC2 chirikov(VEC2 z, VEC2 c) {
 #endif
 #define DO_LOOP_ANTI(name) \
   for (i = 0; i < iIters; ++i) { \
-    pz = z; \
+    if(iStep == 0) \
+    { \
+      pz = z; \
+    } \
+    iStep++;\
     z = name(z, c); \
-    if (distance (z, pz) < ANTI_ESCAPE) { break; } \
+    if(iStep == iStepsToAnti) \
+    { \
+      iStep = 0; \
+      VEC2 d = pz - z; \
+      if (dot(d,d) < ANTI_ESCAPE) { break; } \
+    } \
   }
 
 VEC2 decardioidify(VEC2 p, float f)
@@ -128,6 +139,7 @@ vec3 fractal(VEC2 z, VEC2 c) {
   int i;
   if(FLAG_USE_COLOR2)
   {
+    int iStep = 0;
     switch (iType) {
       case 0: DO_LOOP_ANTI(mandelbrot); break;
       case 1: DO_LOOP_ANTI(dumb_mandelbrot); break;

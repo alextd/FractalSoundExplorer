@@ -745,6 +745,7 @@ int highlight_index = 0;
 bool findFreezeIndex;
 double findx, findy;
 double decardioid_amount = 0;
+int iStepsToAnti = 1;
 std::string cAsString, clickAsString;
 
 
@@ -1058,7 +1059,7 @@ int main(int argc, char *argv[]) {
 
   //Load the fragment shader
   if (!shader.loadFromFile("frag.glsl", sf::Shader::Fragment)) {
-    std::cout << "Failed to compile fragment shader" << std::endl;
+      std::cout << "Failed to compile fragment shader" << std::endl;
     system("pause");
     return 1;
   }
@@ -1097,6 +1098,7 @@ int main(int argc, char *argv[]) {
   shader.setUniform("iCam", sf::Vector2f((float)cam_x, (float)cam_y));
   shader.setUniform("iZoom", (float)cam_zoom);
   shader.setUniform("iDecardioid", (float)decardioid_amount);
+  shader.setUniform("iStepsToAnti", iStepsToAnti);
   SetFractal(shader, starting_fractal, synth);
 
   //Start the synth
@@ -1228,7 +1230,13 @@ int main(int argc, char *argv[]) {
         } else if (keycode == sf::Keyboard::Space) {
           freezeOrbit = !freezeOrbit;
         } else if (keycode == sf::Keyboard::LBracket) {
-          if (event.key.shift){
+          if (event.key.alt)
+          {
+            iStepsToAnti--;
+            if (iStepsToAnti < 1) iStepsToAnti = 1;
+            frame = 0;
+          }
+          else if (event.key.shift){
             if (event.key.control)
               orbit_iters -= 1;
             else
@@ -1240,7 +1248,12 @@ int main(int argc, char *argv[]) {
             shader.setUniform("iIters", graphics_iters);
           }
         } else if (keycode == sf::Keyboard::RBracket) {
-          if (event.key.shift){
+          if (event.key.alt)
+          {
+            iStepsToAnti++;
+            frame = 0;
+          }
+          else if (event.key.shift){
             if (event.key.control)
               orbit_iters += 1;
             else
@@ -1408,6 +1421,7 @@ int main(int argc, char *argv[]) {
     shader.setUniform("iCam", sf::Vector2f((float)cam_x, (float)cam_y));
     shader.setUniform("iZoom", (float)cam_zoom);
     shader.setUniform("iDecardioid", (float)decardioid_amount);
+    shader.setUniform("iStepsToAnti", iStepsToAnti);
     shader.setUniform("iFlags", flags);
     shader.setUniform("iJulia", sf::Vector2f((float)jx, (float)jy));
     shader.setUniform("iIters", graphics_iters);
@@ -1468,6 +1482,7 @@ int main(int argc, char *argv[]) {
       double cx = (hasJulia ? jx : px);
       double cy = (hasJulia ? jy : py);
       double highlightDelta = 0;
+      int iStep = 0, iStepsNeeded = 0;
 
       //Draw the orbit
       if (!hide_orbit) {
@@ -1491,8 +1506,10 @@ int main(int argc, char *argv[]) {
         }
 
         int i, exponential_i = 1;
+        double lastX = x , lastY = y, prevX, prevY;
         for (i = 0; i < orbit_iters; ++i) {
-          double lastX = x, lastY = y;
+
+          prevX = x, prevY = y;
           if (draw_exponential_orbit && (i+1 != exponential_i))
             fractal(x, y, cx, cy);
           else
@@ -1501,6 +1518,23 @@ int main(int argc, char *argv[]) {
             DrawStep(x, y, cx, cy, i+1);
           }
 
+          iStep++;
+          if (iStepsNeeded == 0 && iStep == iStepsToAnti)
+          {
+            iStep = 0;
+            double dx = prevX - x, dy = prevY - y;
+#define ANTI_ESCAPE_ACTUALLY 0.00001
+#define ANTI_ESCAPE ANTI_ESCAPE_ACTUALLY*ANTI_ESCAPE_ACTUALLY
+            if (dx* dx + dy*dy < ANTI_ESCAPE)
+            {
+              iStepsNeeded = i;
+            }
+          }
+
+          if (freezeOrbit && i == highlight_index - 1 - iStepsToAnti)
+          {
+            lastX = x, lastY = y;
+          }
           if (freezeOrbit && i == highlight_index - 1)
           {
             highlightDelta = std::sqrt((lastX - x) * (lastX - x) + (lastY - y) * (lastY - y));
@@ -1641,7 +1675,7 @@ int main(int argc, char *argv[]) {
         if (highlightDelta > 0)
         {
           std::ostringstream oss;
-          oss << std::setprecision(10) << highlightDelta;
+          oss << std::fixed << std::setprecision(10) << highlightDelta;
           hdstr = oss.str();
         }
 
@@ -1649,7 +1683,7 @@ int main(int argc, char *argv[]) {
           "(" + std::to_string(cTheta) + "°, " + std::to_string(cRadius) + ")\n" +
           "(" + std::to_string(mTheta) + "°, " + std::to_string(mRadius) + ")\n" +
           "Highlight: " + std::to_string(highlight_index) + ", Colors: " + std::to_string(color_cycle) + "\n" +
-          "Dist from prev: " + hdstr);
+          std::to_string(iStepsNeeded) + " / Dist from " + std::to_string(iStepsToAnti) + " ago: " + hdstr);
         orbit_stepText.setPosition(window_w / 2 + 10.0f, 5.0f);
         window.draw(orbit_stepText);
         window.popGLStates();
