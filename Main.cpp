@@ -1750,7 +1750,7 @@ int main(int argc, char *argv[]) {
         "  F5 - Hénon Map                     [ ] - Inc/decrease iterations *2 (shift-[] for drawn lines, ctrl-[] steps +1) \n"
         "  F6 - Duffing Map                     Z - Show Mandelbrot Half-steps\n"
         "  F7 - Ikeda Map                       N - Use cyclic colors (each N adds another color, shift-N removes one)\n"
-        "  F8 - Chirikov Map                    P - Draw cyclic iterations (each N skips +1 step, shift-N -1)\n"
+        "  F8 - Chirikov Map                    O - Draw cyclic iterations (each O skips +1 step, shift-O -1)\n"
         "  F9 - Burning Ship                    B - Drag and draw lines. Ctrl-B connects to previous point. Shift-B erases.\n"
         "   I - Toggle bottom-edge slider mode: C=Cardioid Edge, Decardioid amount, C=Brush"
       );
