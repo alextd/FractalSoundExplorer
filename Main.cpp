@@ -14,7 +14,7 @@
 #include <functional>
 #include <mutex>
 #include <queue>
-#include "gsl/gsl_poly.h"
+//#include "gsl/gsl_poly.h"
 
 //Constants
 static const int target_fps = 24;
