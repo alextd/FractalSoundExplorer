@@ -167,8 +167,19 @@ void ikeda(double& x, double& y, double cx, double cy) {
   y = ny;
 }
 void chirikov(double& x, double& y, double cx, double cy) {
-  y += cy*std::sin(x);
-  x += cx*y;
+  y += cy * std::sin(x);
+  x += cx * y;
+}
+void latte(double& x, double& y, double cx, double cy) {
+  std::complex<double> z(x, y);
+  std::complex<double> zs = z*z;
+  std::complex<double> zsp(zs.real() + 1, zs.imag());
+  std::complex<double> zsm(zs.real() - 1, zs.imag());
+  std::complex<double> z4(zs.real() *4, zs.imag()*4);
+
+  std::complex<double> result = (zsp*zsp)/(z4*zsm);
+  x = result.real();
+  y = result.imag();
 }
 
 //List of fractal equations
@@ -182,6 +193,7 @@ static const Fractal all_fractals[] = {
   ikeda,
   chirikov,
   burning_ship,
+  latte
 };
 
 void PtToPolar(double x, double y, double& theta, double& radius)
@@ -741,7 +753,8 @@ void SetFractal(sf::Shader& shader, int type, Synth& synth) {
 //Starting point, C
 double px, py, clickx, clicky, cTheta, cRadius, orbit_x = 0, orbit_y = 0;
 int orbit_step = 0;
-int highlight_index = 0; 
+int highlight_index = 0;
+std::string hAsString;
 bool findFreezeIndex;
 double findx, findy;
 double decardioid_amount = 0;
@@ -1139,7 +1152,7 @@ int main(int argc, char *argv[]) {
         {
           StartInputPoint();
         }
-        else if (keycode >= sf::Keyboard::F1 && keycode <= sf::Keyboard::F9) {
+        else if (keycode >= sf::Keyboard::F1 && keycode <= sf::Keyboard::F10) {
           SetFractal(shader, keycode - sf::Keyboard::F1, synth);
         }
         else if (keycode >= sf::Keyboard::Num0 && keycode <= sf::Keyboard::Num9) {
@@ -1481,14 +1494,13 @@ int main(int argc, char *argv[]) {
     {
       double cx = (hasJulia ? jx : px);
       double cy = (hasJulia ? jy : py);
+      double hx = 5000, hy = 5000;//highlight point, default out of sight
       double highlightDelta = 0;
       int iStep = 0, iStepsNeeded = 0;
 
       //Draw the orbit
       if (!hide_orbit) {
         //Draw the lines
-        double hx = -50, hy = -50;//highlight point, default out of sight
-        double findr = 100;
 
         glLineWidth(2.0f);
         glPointSize(5.0f);
@@ -1498,6 +1510,13 @@ int main(int argc, char *argv[]) {
         int stepsDone = 0;
         double x = orbit_x;
         double y = orbit_y;
+        double findr;
+
+        if (findFreezeIndex)
+        {
+          findr = (findx - x) * (findx - x) + (findy - y) * (findy - y);
+          highlight_index = 0;
+        }
         PtToScreen(x, y, sx, sy);
         glVertex2i(sx, sy);
         if (freezeOrbit && 0 == highlight_index)
@@ -1663,28 +1682,41 @@ int main(int argc, char *argv[]) {
         window.draw(dimRect, sf::RenderStates(BlendAlpha));
 
         window.pushGLStates();
-        orbit_stepText.setPosition(20.0f, 5.0f);
-        orbit_stepText.setString(
+
+        std::string drawStr =
           "C = " + cAsString + "\n" +
           "Click: " + clickAsString + "\n" +
           "Mouse: " + mouseAsString + "\n" +
-          "Step: " + std::to_string(orbit_step) + "\tMax Iterations: " + std::to_string(orbit_iters) + "/" + std::to_string(graphics_iters));
+          "Step: " + std::to_string(orbit_step) + "\tMax Iterations: " + std::to_string(orbit_iters) + "/" + std::to_string(graphics_iters);
+
+        orbit_stepText.setPosition(20.0f, 5.0f);
+        orbit_stepText.setString(drawStr);
         window.draw(orbit_stepText);
         
+        /*
+        // For inverse coloring, highlight delta distance
         std::string hdstr = "?";
         if (highlightDelta > 0)
         {
           std::ostringstream oss;
           oss << std::fixed << std::setprecision(10) << highlightDelta;
           hdstr = oss.str();
-        }
+        }*/
 
-        orbit_stepText.setString(
+        drawStr = 
           "(" + std::to_string(cTheta) + "°, " + std::to_string(cRadius) + ")\n" +
-          "(" + std::to_string(mTheta) + "°, " + std::to_string(mRadius) + ")\n" +
-          "Highlight: " + std::to_string(highlight_index) + ", Colors: " + std::to_string(color_cycle) + "\n" +
-          std::to_string(iStepsNeeded) + " / Dist from " + std::to_string(iStepsToAnti) + " ago: " + hdstr);
+          "(" + std::to_string(mTheta) + "°, " + std::to_string(mRadius) + ")\n";
+        if (drawFreezeIndex)
+        {
+          PtToString(hx, hy, hAsString);
+          drawStr += "H(" + std::to_string(highlight_index) + ") "+ hAsString +"\n";
+        }
+        if (color_cycle > 1)
+          drawStr += "Colors: " + std::to_string(color_cycle) + "\n";
+        //+ std::to_string(iStepsNeeded) + " / Dist from " + std::to_string(iStepsToAnti) + " ago: " + hdstr
+
         orbit_stepText.setPosition(window_w / 2 + 10.0f, 5.0f);
+        orbit_stepText.setString(drawStr);
         window.draw(orbit_stepText);
         window.popGLStates();
         glPopMatrix();

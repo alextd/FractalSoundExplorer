@@ -92,6 +92,9 @@ VEC2 chirikov(VEC2 z, VEC2 c) {
   z.x += c.x*z.y;
   return z;
 }
+VEC2 latte(VEC2 z, VEC2 c) {
+  return cx_sqr(cx_sqr(z)+cx_one)/(4.0*z*(cx_sqr(z)-cx_one));
+}
 
 #if 0
 #define DO_LOOP(name) \
@@ -104,12 +107,14 @@ VEC2 chirikov(VEC2 z, VEC2 c) {
     sumz.y += dot(z - pz, z - pz); \
     sumz.z += dot(z - ppz, z - ppz); \
   }
-#else
+#elif 1
 #define DO_LOOP(name) \
   for (i = 0; i < iIters; ++i) { \
     z = name(z, c); \
     if (dot(z, z) > ESCAPE) { break; } \
   }
+#else
+#define DO_LOOP(name) for (i = 0; i < iIters; ++i) { z = name(z, c); }
 #endif
 #define DO_LOOP_ANTI(name) \
   for (i = 0; i < iIters; ++i) { \
@@ -150,6 +155,7 @@ vec3 fractal(VEC2 z, VEC2 c) {
       case 6: DO_LOOP_ANTI(ikeda); break;
       case 7: DO_LOOP_ANTI(chirikov); break;
       case 8: DO_LOOP_ANTI(burning_ship); break;
+      case 9: DO_LOOP_ANTI(latte); break;
     }
   }
   else
@@ -164,6 +170,7 @@ vec3 fractal(VEC2 z, VEC2 c) {
       case 6: DO_LOOP(ikeda); break;
       case 7: DO_LOOP(chirikov); break;
       case 8: DO_LOOP(burning_ship); break;
+      case 9: DO_LOOP(latte); break;
     }
   }
 
