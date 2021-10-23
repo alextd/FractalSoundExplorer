@@ -44,13 +44,25 @@ static bool use_color = false,use_color2 = false;
 static bool hide_orbit = true;
 static bool hide_label = true;
 static bool draw_exponential_orbit = false;
-static double jx = 1e8;
-static double jy = 1e8;
 static int graphics_iters = 1000;
 static int frame = 0;
 static bool mute = true;
 static bool drawIterPoints = false;
 static bool freezeOrbit = true, drawFreezeIndex = false;
+static bool noReflect = false;
+
+//Points
+static double x_c, y_c;//+C point
+static double x_start, y_start;//Starting Z
+
+//Input points
+static double x_click, y_click;//Clicked pixel -> sets x_start (x_c when juliaInvert)
+static double x_julia = 1e8, y_julia = 1e8;//Julia point, aka the point that is specific to the current screen (no meaning for mandelbrot
+//sets x_c for Julia sets (x_start when juliaInvert)
+bool hasJulia = false, juliaOverlay = false, juliaInvert = false;
+
+//Other points to savei
+static double x_orbit, y_orbit;//current iteration of Z around the orbit after X steps
 
 //Fractal abstraction definition
 typedef void (*Fractal)(double&, double&, double, double);
@@ -79,12 +91,12 @@ int PtYToScreen(double py) {
 }
 
 //All fractal equations
-void mandelbrot_hole(double& x, double& y, double cx, double cy) {
+void mandelbrot_hole(double& x, double& y, double x_c, double y_c) {
   //H-H^2=C
   std::complex<double> one(1, 0);
   std::complex<double> two(2, 0);
   std::complex<double> four(4, 0);
-  std::complex<double> C(cx, cy);
+  std::complex<double> C(x_c, y_c);
   std::complex<double> hole= (one - std::sqrt(one - four * C))/(two);
   x = hole.real();
   y = hole.imag();
@@ -95,9 +107,9 @@ void mandelbrot_hole(double& x, double& y, double cx, double cy) {
   x = cx - nx;
   y = cy - ny;*/
 }
-void mandelbrot(double& x, double& y, double cx, double cy) {
-  double nx = x*x - y*y + cx;
-  double ny = 2.0*x*y + cy;
+void mandelbrot(double& x, double& y, double x_c, double y_c) {
+  double nx = x*x - y*y + x_c;
+  double ny = 2.0*x*y + y_c;
   x = nx;
   y = ny;
 }
@@ -114,63 +126,63 @@ void decardioidify(double& x, double& y, double f) {
   x = p.real();
   y = p.imag();
 }
-void mandelbrot2(double& x, double& y, double cx, double cy) {
-  x += cx; y += cy;
+void mandelbrot2(double& x, double& y, double x_c, double y_c) {
+  x += x_c; y += y_c;
 }
-void dumb_mandelbrot(double& x, double& y, double cx, double cy) {
+void dumb_mandelbrot(double& x, double& y, double x_c, double y_c) {
   double nx = x * x - y * y;
   double ny = 2.0 * x * y;
   x = nx;
   y = ny;
 }
-void burning_ship(double& x, double& y, double cx, double cy) {
-  double nx = x*x - y*y + cx;
-  double ny = 2.0*std::abs(x*y) + cy;
+void burning_ship(double& x, double& y, double x_c, double y_c) {
+  double nx = x*x - y*y + x_c;
+  double ny = 2.0*std::abs(x*y) + y_c;
   x = nx;
   y = ny;
 }
-void feather(double& x, double& y, double cx, double cy) {
+void feather(double& x, double& y, double x_c, double y_c) {
   std::complex<double> z(x, y);
   std::complex<double> z2(x*x, y*y);
-  std::complex<double> c(cx, cy);
+  std::complex<double> c(x_c, y_c);
   std::complex<double> one(1.0, 0.0);
   z = z*z*z/(one + z2) + c;
   x = z.real();
   y = z.imag();
 }
-void sfx(double& x, double& y, double cx, double cy) {
+void sfx(double& x, double& y, double x_c, double y_c) {
   std::complex<double> z(x, y);
-  std::complex<double> c2(cx*cx, cy*cy);
+  std::complex<double> c2(x_c*x_c, y_c*y_c);
   z = z * (x*x + y*y) - (z * c2);
   x = z.real();
   y = z.imag();
 }
-void henon(double& x, double& y, double cx, double cy) {
-  double nx = 1.0 - cx*x*x + y;
-  double ny = cy*x;
+void henon(double& x, double& y, double x_c, double y_c) {
+  double nx = 1.0 - x_c*x*x + y;
+  double ny = y_c*x;
   x = nx;
   y = ny;
 }
-void duffing(double& x, double& y, double cx, double cy) {
+void duffing(double& x, double& y, double x_c, double y_c) {
   double nx = y;
-  double ny = -cy*x + cx*y - y*y*y;
+  double ny = -y_c*x + x_c*y - y*y*y;
   x = nx;
   y = ny;
 }
-void ikeda(double& x, double& y, double cx, double cy) {
+void ikeda(double& x, double& y, double x_c, double y_c) {
   double t = 0.4 - 6.0 / (1.0 + x*x + y*y);
   double st = std::sin(t);
   double ct = std::cos(t);
-  double nx = 1.0 + cx*(x*ct - y*st);
-  double ny = cy*(x*st + y*ct);
+  double nx = 1.0 + x_c*(x*ct - y*st);
+  double ny = y_c*(x*st + y*ct);
   x = nx;
   y = ny;
 }
-void chirikov(double& x, double& y, double cx, double cy) {
-  y += cy * std::sin(x);
-  x += cx * y;
+void chirikov(double& x, double& y, double x_c, double y_c) {
+  y += y_c * std::sin(x);
+  x += x_c * y;
 }
-void latte(double& x, double& y, double cx, double cy) {
+void latte(double& x, double& y, double x_c, double y_c) {
   std::complex<double> z(x, y);
   std::complex<double> zs = z*z;
   std::complex<double> zsp(zs.real() + 1, zs.imag());
@@ -227,17 +239,17 @@ inline SpecialPointType& operator++(enum SpecialPointType& state, int) {
 
 
 
-void DrawSpecial(double cx, double cy)
+void DrawSpecial(double x_c, double y_c)
 {
   int sx, sy;
   double holeX, holeY;
-  mandelbrot_hole(holeX, holeY, cx, cy);
+  mandelbrot_hole(holeX, holeY, x_c, y_c);
   switch (draw_special)
   {
   case SpecialPointType::CSqMH:
   case SpecialPointType::HoleReflect:
   case SpecialPointType::Hole:
-    //std::complex<double> iHole(cx, cy);
+    //std::complex<double> iHole(x_c, y_c);
     //iHole = iHole - (iHole * iHole);
     PtToScreen(holeX, holeY, sx, sy);
     glVertex2i(sx, sy);
@@ -250,7 +262,7 @@ void DrawSpecial(double cx, double cy)
     if(draw_special == SpecialPointType::CSqMH)
     {
       std::complex<double> h(holeX, holeY);
-      std::complex<double> c(cx, cy);
+      std::complex<double> c(x_c, y_c);
       std::complex<double> cSqMH = std::sqrt((c - h) * (c - h));
       PtToScreen(cSqMH.real(), cSqMH.imag(), sx, sy);
       glVertex2i(sx, sy);
@@ -366,15 +378,15 @@ void DrawGrid(const sf::Window& window)
       glEnd();
     }
     glBegin(GL_LINES);
-    int ox, oy;
-    PtToScreen(0, 0, ox, oy);
+    int x0, y0;
+    PtToScreen(0, 0, x0, y0);
     for (double theta = 0; theta < 2 * M_PI; theta += M_PI / 4)
     {
       double px, py;
       PolarToPt(theta, 1, px, py);
       PtToScreen(px, py, sx, sy);
       glVertex2i(sx, sy);
-      glVertex2i(ox, oy);
+      glVertex2i(x0, y0);
     }
     glEnd();
     break;
@@ -473,7 +485,7 @@ inline HalfStep& operator++(enum HalfStep& state, int) {
   return state;
 }
 
-void DrawStep(double& x, double& y, double cx, double cy, int i)
+void DrawStep(double& x, double& y, double x_c, double y_c, int i)
 {
   int sx, sy;
   double hx = x, hy = y;//copies for half-points
@@ -483,7 +495,7 @@ void DrawStep(double& x, double& y, double cx, double cy, int i)
   {
   case HalfStep::None:
     //ezpz, draw next point, also in red.
-    fractal(x, y, cx, cy);
+    fractal(x, y, x_c, y_c);
     PtToScreen(x, y, sx, sy);
     if (color_cycle > 1 && freezeOrbit)
       SetColor(i);
@@ -506,7 +518,7 @@ void DrawStep(double& x, double& y, double cx, double cy, int i)
     
     
     //Apply fractal function for next point
-    fractal(x, y, cx, cy);
+    fractal(x, y, x_c, y_c);
     PtToScreen(x, y, sx, sy);
 
     //Blend to yellow to next point
@@ -559,7 +571,7 @@ void DrawStep(double& x, double& y, double cx, double cy, int i)
 
 
     //Apply fractal function for next point
-    fractal(x, y, cx, cy);
+    fractal(x, y, x_c, y_c);
     PtToScreen(x, y, sx, sy);
 
     if (drawIterPoints)
@@ -629,8 +641,8 @@ public:
     //Check if audio needs to reset
     if (audio_reset) {
       m_audio_time = 0;
-      play_cx = (jx < 1e8 ? jx : play_nx);
-      play_cy = (jy < 1e8 ? jy : play_ny);
+      play_cx = (x_julia < 1e8 ? x_julia : play_nx);
+      play_cy = (y_julia < 1e8 ? y_julia : play_ny);
       play_x = play_nx;
       play_y = play_ny;
       play_px = play_nx;
@@ -728,6 +740,9 @@ public:
   double dpy;
 };
 
+static Synth* synth;
+
+
 void PtToString(double x, double y, std::string& str)
 {
   // precise stream to print coordinates
@@ -738,20 +753,7 @@ void PtToString(double x, double y, std::string& str)
   pointStrStream << x << ", " << -y;
   str = pointStrStream.str();
 }
-
-//Change the fractal
-void SetFractal(sf::Shader& shader, int type, Synth& synth) {
-  shader.setUniform("iType", type);
-  jx = jy = 1e8;
-  fractal = all_fractals[type];
-  normalized = (type == 0);
-  synth.audio_pause = true;
-  hide_orbit = true;
-  frame = 0;
-}
-
-//Starting point, C
-double px, py, clickx, clicky, cTheta, cRadius, orbit_x = 0, orbit_y = 0;
+static double cTheta, cRadius;
 int orbit_step = 0;
 int highlight_index = 0;
 std::string hAsString;
@@ -770,23 +772,68 @@ inline BottomScrollingType& operator++(enum BottomScrollingType& state, int) {
   return state;
 }
 
-//Start the process at px,py.
-void StartPoint(Synth& synth)
+//Start the process given the clicked point (and maybe the julia point)
+void InitPts()
 {
-  PtToString(clickx, clicky, clickAsString);
-  px = clickx; py = clicky;
-  if (bottom_scroll_type == BottomScrollingType::Decard || bottom_scroll_type == BottomScrollingType::DecardHalf)
-    decardioidify(px, py, decardioid_amount);
-  hide_orbit = false;
-  if (!mute) synth.SetPoint(px, py);
-  orbit_x = px;
-  orbit_y = py;
-  orbit_step = 0;
-  PtToPolar(px, py, cTheta, cRadius);
-  cTheta *= 180 / M_PI;
-  if(jx == 1e8)
-    PtToString(px, py, cAsString);
+  //Set C and starting Z
+  x_c = hasJulia && !juliaInvert ? x_julia : x_click;
+  y_c = hasJulia && !juliaInvert ? y_julia : y_click;
+  x_start = hasJulia && juliaInvert ? x_julia : x_click;
+  y_start = hasJulia && juliaInvert ? y_julia : y_click;
 }
+void ResetOrbit()
+{
+  //Start the orbit
+  x_orbit = x_start;
+  y_orbit = y_start;
+  orbit_step = 0;
+}
+void StartPoint()
+{
+  PtToString(x_click, y_click, clickAsString);
+
+  InitPts();
+
+  //Do some silly transform
+  if (bottom_scroll_type == BottomScrollingType::Decard || bottom_scroll_type == BottomScrollingType::DecardHalf)
+    decardioidify(x_start, y_start, decardioid_amount);
+
+  //Sound?
+  if (!mute) synth->SetPoint(x_start, y_start);
+
+  ResetOrbit();
+
+  //Some string printing helpers:
+  PtToPolar(x_start, y_start, cTheta, cRadius);
+  cTheta *= 180 / M_PI;
+  if(x_julia == 1e8){}
+    PtToString(x_start, y_start, cAsString);
+
+  //Hey. show it.
+  hide_orbit = false;
+}
+
+//Julia
+void SetJulia(double x = 1e8, double y = 1e8)
+{
+  x_julia = x; y_julia = y;
+  hasJulia = (x_julia < 1e8);
+  frame = 0;
+
+  InitPts();
+  ResetOrbit();
+}
+
+//Change the fractal
+void SetFractal(sf::Shader& shader, int type) {
+  shader.setUniform("iType", type);
+  SetJulia(1e8, 1e8);
+  fractal = all_fractals[type];
+  normalized = (type == 0);
+  synth->audio_pause = true;
+  hide_orbit = true;
+}
+
 
 //Mouse Point to print
 std::string mouseAsString;
@@ -801,21 +848,21 @@ double slid_lerp;
 bool started_slid;
 void SavePoint(int state)
 {
-  x_save[state] = clickx;
-  y_save[state] = clicky;
+  x_save[state] = x_click;
+  y_save[state] = y_click;
 }
-void LoadPoint(int state, Synth& synth)
+void LoadPoint(int state)
 {
-  clickx = x_save[state];
-  clicky = y_save[state];
-  StartPoint(synth);
+  x_click = x_save[state];
+  y_click = y_save[state];
+  StartPoint();
 }
 void SliderPoint(double slider)
 {
   started_slid = true;
   slid_lerp = slider;
-  clickx = x_save[1] * (1 - slider) + x_save[2] * slider;
-  clicky = y_save[1] * (1 - slider) + y_save[2] * slider;
+  x_click = x_save[1] * (1 - slider) + x_save[2] * slider;
+  y_click = y_save[1] * (1 - slider) + y_save[2] * slider;
 }
 void DrawBrushPoints()
 {
@@ -845,7 +892,7 @@ double lerp(double a, double b, double f)
 {
   return (a * (1.0 - f)) + (b * f);
 }
-void StartScreenPoint(Synth& synth, int sx, int sy)
+void StartScreenPoint(int sx, int sy)
 {
   started_slid = false;
   //set clickx,clicky
@@ -878,7 +925,7 @@ void StartScreenPoint(Synth& synth, int sx, int sy)
         PolarToPt(theta, .5, tx, ty);
         htx = tx; hty = ty;
         complex_square(htx, hty);
-        clickx = tx - htx; clicky = ty - hty;
+        x_click = tx - htx; y_click = ty - hty;
         break;
       }
       case BottomScrollingType::Brush:
@@ -895,23 +942,23 @@ void StartScreenPoint(Synth& synth, int sx, int sy)
 
         if (index == bCount - 1)
         {
-          clickx = usablePoints[index].x;
-          clicky = usablePoints[index].y;
+          x_click = usablePoints[index].x;
+          y_click = usablePoints[index].y;
         }
         else
         {
-          clickx = lerp(usablePoints[index].x, usablePoints[index + 1].x, lerpAmount);
-          clicky = lerp(usablePoints[index].y, usablePoints[index + 1].y, lerpAmount);
+          x_click = lerp(usablePoints[index].x, usablePoints[index + 1].x, lerpAmount);
+          y_click = lerp(usablePoints[index].y, usablePoints[index + 1].y, lerpAmount);
         }
         break;
       }
     }
   }
   else
-    ScreenToPt(sx, sy, clickx, clicky);
+    ScreenToPt(sx, sy, x_click, y_click);
   
   //clickpoint is set, use it:
-  StartPoint(synth);
+  StartPoint();
 }
 
 //Save the Camera View
@@ -940,7 +987,7 @@ void StartInputPoint()
   inputting_x = true;
   inputting_y = false;
 }
-void FinalizeInputCoor(sf::Event& event, Synth& synth)
+void FinalizeInputCoor(sf::Event& event)
 {
   inputting_x = false;
   inputting_y = false;
@@ -948,13 +995,13 @@ void FinalizeInputCoor(sf::Event& event, Synth& synth)
   double y = input_str_y.empty() ? 0 : -std::stod(input_str_y);
   if (event.key.shift)
   {
-    jx = x; jy = y;
+    SetJulia(x, y);
   }
   else
   {
-    clickx = x; clicky = y;
+    x_click = x; y_click = y;
   }
-  StartPoint(synth);
+  StartPoint();
 }
 void InputPointKey(const sf::Keyboard::Key key)
 {
@@ -1105,17 +1152,17 @@ int main(int argc, char *argv[]) {
   make_window(window, renderTexture, settings, is_fullscreen);
 
   //Create audio synth
-  Synth synth(window.getSystemHandle());
+  synth = new Synth(window.getSystemHandle());
 
   //Setup the shader
   shader.setUniform("iCam", sf::Vector2f((float)cam_x, (float)cam_y));
   shader.setUniform("iZoom", (float)cam_zoom);
   shader.setUniform("iDecardioid", (float)decardioid_amount);
   shader.setUniform("iStepsToAnti", iStepsToAnti);
-  SetFractal(shader, starting_fractal, synth);
+  SetFractal(shader, starting_fractal);
 
   //Start the synth
-  synth.play();
+  synth->play();
 
   //Main Loop
   bool leftPressed = false;
@@ -1140,7 +1187,7 @@ int main(int argc, char *argv[]) {
         if (inputting_x || inputting_y)
         {
           if (keycode == sf::Keyboard::Enter)
-            FinalizeInputCoor(event, synth);
+            FinalizeInputCoor(event);
           else
             InputPointKey(keycode);
         }
@@ -1153,7 +1200,7 @@ int main(int argc, char *argv[]) {
           StartInputPoint();
         }
         else if (keycode >= sf::Keyboard::F1 && keycode <= sf::Keyboard::F10) {
-          SetFractal(shader, keycode - sf::Keyboard::F1, synth);
+          SetFractal(shader, keycode - sf::Keyboard::F1);
         }
         else if (keycode >= sf::Keyboard::Num0 && keycode <= sf::Keyboard::Num9) {
           int state = keycode - sf::Keyboard::Num0;
@@ -1167,9 +1214,9 @@ int main(int argc, char *argv[]) {
           if (event.key.control)
             SavePoint(state);
           else
-            LoadPoint(state, synth);
+            LoadPoint(state);
         } else if (keycode == sf::Keyboard::Tilde) {
-          StartPoint(synth);
+          StartPoint();
         } else if (keycode == sf::Keyboard::F11) {
           toggle_fullscreen = true;
         } else if (keycode == sf::Keyboard::D) {
@@ -1200,24 +1247,33 @@ int main(int argc, char *argv[]) {
           cam_zoom = cam_zoom_dest = 400.0;
           frame = 0;
         } else if (keycode == sf::Keyboard::J) {
-          if (jx < 1e8) {
-            jx = jy = 1e8;
-          }
+          if (event.key.alt)
+            juliaInvert = !juliaInvert;
+          else if (event.key.control)
+            juliaOverlay = !juliaOverlay;
           else
           {
-            if (event.key.shift) {
-              jx = px; jy = py;
+            if (x_julia < 1e8) {
+              SetJulia();
             }
-            else {
-              juliaDrag = true;
-              const sf::Vector2i mousePos = sf::Mouse::getPosition(window);
-              ScreenToPt(mousePos.x, mousePos.y, jx, jy);
+            else
+            {
+              if (event.key.shift) {
+                SetJulia(x_click, y_click);
+              }
+              else {
+                juliaDrag = true;
+                const sf::Vector2i mousePos = sf::Mouse::getPosition(window);
+                ScreenToPt(mousePos.x, mousePos.y, x_julia, y_julia);
+                SetJulia(x_julia, y_julia); //sort of redundant but the OUT param above makes this awkward.
+              }
+              PtToString(x_julia, y_julia, cAsString);
             }
-            PtToString(jx, jy, cAsString);
+            synth->audio_pause = true;
+            //hide_orbit = true;// Actually keep the orbit drawn while choosing julia
           }
-          synth.audio_pause = true;
-          hide_orbit = true;
-          frame = 0;
+        } else if (keycode == sf::Keyboard::K) {
+          noReflect = !noReflect;
         } else if (keycode == sf::Keyboard::S) {
           takeScreenshot = true;
         } else if (keycode == sf::Keyboard::H) {
@@ -1293,24 +1349,22 @@ int main(int argc, char *argv[]) {
           highlight_index += event.key.control ? 3 : event.key.shift ? 30 : 1;
           if (highlight_index > orbit_iters) highlight_index = orbit_iters;
         } else if (keycode == sf::Keyboard::F) {
-          double x = orbit_x;
-          double y = orbit_y;
+          double x = x_orbit;
+          double y = y_orbit;
           int numSteps = event.key.control ? 1 : event.key.shift ? 100 : 10;
-          double cx = ((jx < 1e8) ? jx : px);
-          double cy = ((jx < 1e8) ? jy : py);
           for (int i = 0; i < numSteps; ++i) {
-            fractal(x, y, cx, cy);
+            fractal(x, y, x_c, y_c);
             if (x * x + y * y > escape_radius_sq) {
               break;
             }
 
             orbit_step ++;
           }
-          orbit_x = x;
-          orbit_y = y;
+          x_orbit = x;
+          y_orbit = y;
         } else if (keycode == sf::Keyboard::M) {
           mute = !mute;
-          synth.audio_pause = mute;
+          synth->audio_pause = mute;
         } else if (keycode == sf::Keyboard::Z) {
           half_step_mode++;
         } else if (keycode == sf::Keyboard::N) {
@@ -1364,12 +1418,12 @@ int main(int argc, char *argv[]) {
       } else if (event.type == sf::Event::MouseButtonPressed) {
         if (event.mouseButton.button == sf::Mouse::Left) {
           leftPressed = true;
-          StartScreenPoint(synth, event.mouseButton.x, event.mouseButton.y);
+          StartScreenPoint(event.mouseButton.x, event.mouseButton.y);
         } else if (event.mouseButton.button == sf::Mouse::Right) {
           prevDrag = sf::Vector2i(event.mouseButton.x, event.mouseButton.y);
           dragging = true;
         } else if (event.mouseButton.button == sf::Mouse::XButton1) {
-          synth.audio_pause = true;
+          synth->audio_pause = true;
           hide_orbit = true;
         }
       } else if (event.type == sf::Event::MouseButtonReleased) {
@@ -1391,7 +1445,7 @@ int main(int argc, char *argv[]) {
           brushPoints.push_back(sf::Vector2(mx, my));
         }
         if (leftPressed) {
-          StartScreenPoint(synth, sx, sy);
+          StartScreenPoint(sx, sy);
         }
         if (dragging) {
           sf::Vector2i curDrag = sf::Vector2i(sx, sy);
@@ -1401,9 +1455,7 @@ int main(int argc, char *argv[]) {
           frame = 0;
         }
         if (juliaDrag) {
-          jx = mx;
-          jy = my;
-          frame = 0;
+          SetJulia(mx, my);
         }
       }
     }
@@ -1421,12 +1473,15 @@ int main(int argc, char *argv[]) {
     cam_y = cam_y*0.8 + cam_y_dest*0.2;
 
     //Create drawing flags for the shader
-    const bool hasJulia = (jx < 1e8);
-    const bool drawMset = (juliaDrag || !hasJulia);
-    const bool drawJset = (juliaDrag || hasJulia);
+    const bool drawMset = ((juliaDrag && juliaOverlay) || !hasJulia);
+    const bool eitherJulia = (juliaDrag || hasJulia);
+    const bool drawJset = !juliaInvert && eitherJulia;
+    const bool drawIJset = juliaInvert && eitherJulia;
     const int flags = (drawMset ? 0x01 : 0) | (drawJset ? 0x02 : 0) | (use_color ? 0x04 : 0) | (use_color2 ? 0x10 : 0)
       | (bottom_scroll_type == BottomScrollingType::Decard ? 0x08 : 0)
-      | (bottom_scroll_type == BottomScrollingType::DecardHalf ? 0x08 : 0);
+      | (bottom_scroll_type == BottomScrollingType::DecardHalf ? 0x08 : 0)
+      | (noReflect ? 0x20 : 0)
+      | (drawIJset ? 0x40 : 0);
 
     //Set the shader parameters
     const sf::Glsl::Vec2 window_res((float)window_w, (float)window_h);
@@ -1436,7 +1491,7 @@ int main(int argc, char *argv[]) {
     shader.setUniform("iDecardioid", (float)decardioid_amount);
     shader.setUniform("iStepsToAnti", iStepsToAnti);
     shader.setUniform("iFlags", flags);
-    shader.setUniform("iJulia", sf::Vector2f((float)jx, (float)jy));
+    shader.setUniform("iJulia", sf::Vector2f((float)x_julia, (float)y_julia));
     shader.setUniform("iIters", graphics_iters);
     shader.setUniform("iTime", frame);
 
@@ -1492,8 +1547,6 @@ int main(int argc, char *argv[]) {
     }
     else
     {
-      double cx = (hasJulia ? jx : px);
-      double cy = (hasJulia ? jy : py);
       double hx = 5000, hy = 5000;//highlight point, default out of sight
       double highlightDelta = 0;
       int iStep = 0, iStepsNeeded = 0;
@@ -1506,10 +1559,10 @@ int main(int argc, char *argv[]) {
         glPointSize(5.0f);
         glColor3f(1.0f, 0.0f, 0.0f);
         glBegin(drawIterPoints ? GL_POINTS : GL_LINE_STRIP);
-        double freeze_x = orbit_x, freeze_y = orbit_y;
+        double freeze_x = x_orbit, freeze_y = y_orbit;
         int stepsDone = 0;
-        double x = orbit_x;
-        double y = orbit_y;
+        double x = x_orbit;
+        double y = y_orbit;
         double findr;
 
         if (findFreezeIndex)
@@ -1530,29 +1583,32 @@ int main(int argc, char *argv[]) {
 
           prevX = x, prevY = y;
           if (draw_exponential_orbit && (i+1 != exponential_i))
-            fractal(x, y, cx, cy);
+            fractal(x, y, x_c, y_c);
           else
           {
             exponential_i <<= 1;
-            DrawStep(x, y, cx, cy, i+1);
+            DrawStep(x, y, x_c, y_c, i+1);
           }
 
-          iStep++;
-          if (iStepsNeeded == 0 && iStep == iStepsToAnti)
+          if (use_color2)
           {
-            iStep = 0;
-            double dx = prevX - x, dy = prevY - y;
+            iStep++;
+            if (iStepsNeeded == 0 && iStep == iStepsToAnti)
+            {
+              iStep = 0;
+              double dx = prevX - x, dy = prevY - y;
 #define ANTI_ESCAPE_ACTUALLY 0.00001
 #define ANTI_ESCAPE ANTI_ESCAPE_ACTUALLY*ANTI_ESCAPE_ACTUALLY
-            if (dx* dx + dy*dy < ANTI_ESCAPE)
-            {
-              iStepsNeeded = i;
+              if (dx * dx + dy * dy < ANTI_ESCAPE)
+              {
+                iStepsNeeded = i;
+              }
             }
-          }
 
-          if (freezeOrbit && i == highlight_index - 1 - iStepsToAnti)
-          {
-            lastX = x, lastY = y;
+            if (freezeOrbit && i == highlight_index - 1 - iStepsToAnti)
+            {
+              lastX = x, lastY = y;
+            }
           }
           if (freezeOrbit && i == highlight_index - 1)
           {
@@ -1573,18 +1629,18 @@ int main(int argc, char *argv[]) {
             break;
           }
           else if (i < max_freq / target_fps) {
-            orbit_x = x;
-            orbit_y = y;
+            x_orbit = x;
+            y_orbit = y;
             stepsDone = i + 1;
           }
         }
         glEnd();
         findFreezeIndex = false;
 
-        //Draw the starting point
+        // Draw the C point
         glPointSize(8.0f);
         glBegin(GL_POINTS);
-        PtToScreen(cx, cy, sx, sy);
+        PtToScreen(x_c, y_c, sx, sy);
         glColor3f(1, 1, 1);
         glVertex2i(sx, sy);
         glEnd();
@@ -1594,9 +1650,25 @@ int main(int argc, char *argv[]) {
         glVertex2i(sx, sy);
         glEnd();
 
+        if (hasJulia)
+        {
+          //Also Draw the starting point since it's different for Julia modes
+          glPointSize(8.0f);
+          glBegin(GL_POINTS);
+          PtToScreen(x_start, y_start, sx, sy);
+          glColor3f(1, 1, 1);
+          glVertex2i(sx, sy);
+          glEnd();
+          glPointSize(4.0f);
+          glBegin(GL_POINTS);
+          glColor3f(1, 0, 0);
+          glVertex2i(sx, sy);
+          glEnd();
+        }
+
         if (bottom_scroll_type == BottomScrollingType::Decard || bottom_scroll_type == BottomScrollingType::DecardHalf)
         {
-          PtToScreen(clickx, clicky, sx, sy);
+          PtToScreen(x_click, y_click, sx, sy);
           glPointSize(8.0f);
           glBegin(GL_POINTS);
           glColor3f(1, 1, 0);
@@ -1615,12 +1687,12 @@ int main(int argc, char *argv[]) {
           glPointSize(8.0f);
           glBegin(GL_POINTS);
           glColor3f(1, 0, 0);
-          DrawSpecial(cx, cy);
+          DrawSpecial(x_c, y_c);
           glEnd();
           glPointSize(4.0f);
           glBegin(GL_POINTS);
           glColor3f(1, 1, 1);
-          DrawSpecial(cx, cy);
+          DrawSpecial(x_c, y_c);
           glEnd();
 
           /*
@@ -1658,8 +1730,8 @@ int main(int argc, char *argv[]) {
 
         if (freezeOrbit)
         {
-          orbit_x = freeze_x;
-          orbit_y = freeze_y;
+          x_orbit = freeze_x;
+          y_orbit = freeze_y;
         }
         else
         {
@@ -1692,28 +1764,32 @@ int main(int argc, char *argv[]) {
         orbit_stepText.setPosition(20.0f, 5.0f);
         orbit_stepText.setString(drawStr);
         window.draw(orbit_stepText);
-        
-        /*
-        // For inverse coloring, highlight delta distance
-        std::string hdstr = "?";
-        if (highlightDelta > 0)
-        {
-          std::ostringstream oss;
-          oss << std::fixed << std::setprecision(10) << highlightDelta;
-          hdstr = oss.str();
-        }*/
 
-        drawStr = 
+
+        drawStr =
           "(" + std::to_string(cTheta) + "°, " + std::to_string(cRadius) + ")\n" +
           "(" + std::to_string(mTheta) + "°, " + std::to_string(mRadius) + ")\n";
         if (drawFreezeIndex)
         {
           PtToString(hx, hy, hAsString);
-          drawStr += "H(" + std::to_string(highlight_index) + ") "+ hAsString +"\n";
+          drawStr += "H(" + std::to_string(highlight_index) + ") " + hAsString + "\n";
         }
         if (color_cycle > 1)
           drawStr += "Colors: " + std::to_string(color_cycle) + "\n";
-        //+ std::to_string(iStepsNeeded) + " / Dist from " + std::to_string(iStepsToAnti) + " ago: " + hdstr
+        if (iStepsToAnti > 1)
+        {
+          // For inverse coloring, highlight delta distance
+          /*
+          std::string hdstr = "?";
+          if (highlightDelta > 0)
+          {
+            std::ostringstream oss;
+            oss << std::fixed << std::setprecision(10) << highlightDelta;
+            hdstr = oss.str();
+          }*/
+
+          drawStr += "Steps between: " + std::to_string(iStepsToAnti);// +iStepsNeeded " / Dist from " + std::to_string(iStepsToAnti) + " ago: " + hdstr;
+        }
 
         orbit_stepText.setPosition(window_w / 2 + 10.0f, 5.0f);
         orbit_stepText.setString(drawStr);
@@ -1772,9 +1848,9 @@ int main(int argc, char *argv[]) {
         "       # - Load View                  Left/Right - Highlight next point (when paused) ctrl:3x, shift:30x - Down ends\n"
         "  Ctrl-# - Save View                           F - Step current orbit when paused(next 10 steps, ctrl:1, shift:100)\n"
         "  ` - Repeat Point                  Ctrl-Numpad# - Save Point, Numpad# - Load Point\n"  
-        "  J - Hold down, move mouse, and      (Drag mouse from top-left corner to top-right corner to blend #1 => #2)   \n"
-        "      release to make Julia sets.    \n"
-        "      Press again to switch back       V - Draw the hole.\n"
+        "  J - Toggle/Hold for Julia sets      (Drag mouse from top-left corner to top-right corner to blend #1 => #2)   \n"
+        "      Ctrl-J to toggle overlay.        K - Toggle coloring red for 'reflected' points, alt-[] to add # of steps between reflect detection\n"
+        "      Clt-J to toggle inverse Julia    V - Draw the hole. V again, draw inverse. V a few times more is unimplemeneted. Shift-V to cancel hole.\n"
         "  F1 - Mandelbrot Set                  Z - Toggle Showing Mandelbrot half-steps.\n"
         "  F2 - Dumb Mandelbrot                 G - Cycle grid drawing states\n"
         "  F3 - Feather Fractal                 L - Toggle labels\n"
@@ -1812,6 +1888,6 @@ int main(int argc, char *argv[]) {
   }
 
   //Stop the synth before quitting
-  synth.stop();
+  synth->stop();
   return 0;
 }

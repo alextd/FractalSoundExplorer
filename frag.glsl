@@ -11,12 +11,15 @@
 #define ANTI_ESCAPE_ACTUALLY 0.00001
 #define ANTI_ESCAPE ANTI_ESCAPE_ACTUALLY*ANTI_ESCAPE_ACTUALLY
 #define PI 3.141592653
+#define MAX_STEPS 16
 
 #define FLAG_DRAW_MSET ((iFlags & 0x01) == 0x01)
 #define FLAG_DRAW_JSET ((iFlags & 0x02) == 0x02)
 #define FLAG_USE_COLOR ((iFlags & 0x04) == 0x04)
 #define FLAG_DECARDIOID ((iFlags & 0x08) == 0x08)
 #define FLAG_USE_COLOR2 ((iFlags & 0x10) == 0x10)
+#define FLAG_NOREFLECT ((iFlags & 0x20) == 0x20)
+#define FLAG_DRAW_IJSET ((iFlags & 0x40) == 0x40)
 
 uniform vec2 iResolution;
 uniform vec2 iCam;
@@ -114,8 +117,17 @@ VEC2 latte(VEC2 z, VEC2 c) {
     if (dot(z, z) > ESCAPE) { break; } \
   }
 #else
+#elif 0
+#define DO_LOOP(name) \
+  for (i = 0; i < iIters; ++i) { \
+    if (z.y > 0 ) { faulty = true; break; } \
+    z = name(z, c); \
+    if (dot(z, z) > ESCAPE) { break; } \
+  }
+#else
 #define DO_LOOP(name) for (i = 0; i < iIters; ++i) { z = name(z, c); }
 #endif
+
 #define DO_LOOP_ANTI(name) \
   for (i = 0; i < iIters; ++i) { \
     if(iStep == 0) \
@@ -132,6 +144,20 @@ VEC2 latte(VEC2 z, VEC2 c) {
     } \
   }
 
+#define DO_LOOP_NOREFLECT(name) \
+  for (i = 0; i < iIters; ++i) { \
+    pza[iStep] = z; \
+    iStep = (iStep+1) % iStepsToAnti % MAX_STEPS; \
+    z = name(z, c); \
+    if(i > iStep) \
+    { \
+      VEC2 d = pza[iStep] - z; \
+      VEC2 d2 = -pza[iStep] - z; \
+      if (dot(z, z) < 4 && dot(d,d) > dot(d2, d2)) { faulty=true; break; } \
+    } \
+    if (dot(z, z) > ESCAPE) { break; } \
+  }
+
 VEC2 decardioidify(VEC2 p, float f)
 {
   return (1-f)*p - cx_sqr(f*p);
@@ -139,12 +165,28 @@ VEC2 decardioidify(VEC2 p, float f)
 
 
 vec3 fractal(VEC2 z, VEC2 c) {
-  VEC2 pz = z;
+  bool faulty = false;
   //VEC3 sumz = VEC3(0.0, 0.0, 0.0);
-  int i;
-  if(FLAG_USE_COLOR2)
+  int i, iStep = 0;
+  if(FLAG_NOREFLECT)
   {
-    int iStep = 0;
+    VEC2 pza[MAX_STEPS];//store last X numbers
+    switch (iType) {
+      case 0: DO_LOOP_NOREFLECT(mandelbrot); break;
+      case 1: DO_LOOP_NOREFLECT(dumb_mandelbrot); break;
+      case 2: DO_LOOP_NOREFLECT(feather); break;
+      case 3: DO_LOOP_NOREFLECT(sfx); break;
+      case 4: DO_LOOP_NOREFLECT(henon); break;
+      case 5: DO_LOOP_NOREFLECT(duffing); break;
+      case 6: DO_LOOP_NOREFLECT(ikeda); break;
+      case 7: DO_LOOP_NOREFLECT(chirikov); break;
+      case 8: DO_LOOP_NOREFLECT(burning_ship); break;
+      case 9: DO_LOOP_NOREFLECT(latte); break;
+    }
+  }
+  else if(FLAG_USE_COLOR2)
+  {
+    VEC2 pz = z;
     switch (iType) {
       case 0: DO_LOOP_ANTI(mandelbrot); break;
       case 1: DO_LOOP_ANTI(dumb_mandelbrot); break;
@@ -173,7 +215,10 @@ vec3 fractal(VEC2 z, VEC2 c) {
       case 9: DO_LOOP(latte); break;
     }
   }
-
+  
+  if(faulty) {
+      return vec3(0.2,0.0,0.0);
+  }
   if (i != iIters) {
     if(FLAG_USE_COLOR)
     {
@@ -234,10 +279,13 @@ void main() {
     if (FLAG_DRAW_JSET) {
       col += fractal(c, iJulia);
     }
+    if (FLAG_DRAW_IJSET) {
+      col += fractal(iJulia, c);
+    }
   }
 
   col /= AA_LEVEL;
-  if (FLAG_DRAW_MSET && FLAG_DRAW_JSET) {
+  if (FLAG_DRAW_MSET && (FLAG_DRAW_JSET || FLAG_DRAW_IJSET)) {
     col *= 0.5;
   }
   gl_FragColor = vec4(clamp(col, 0.0, 1.0), 1.0 / (iTime + 1.0));
