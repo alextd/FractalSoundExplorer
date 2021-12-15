@@ -806,7 +806,7 @@ void StartPoint()
   //Some string printing helpers:
   PtToPolar(x_start, y_start, cTheta, cRadius);
   cTheta *= 180 / M_PI;
-  if(x_julia == 1e8){}
+  if(x_julia == 1e8)
     PtToString(x_start, y_start, cAsString);
 
   //Hey. show it.
