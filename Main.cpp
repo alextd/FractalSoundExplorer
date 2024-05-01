@@ -40,7 +40,6 @@ static double cam_y_dest = cam_y;
 static double cam_zoom_dest = cam_zoom;
 static bool sustain = false;
 static bool normalized = true;
-static bool use_color = false,use_color2 = false;
 static bool hide_orbit = true;
 static bool hide_label = true;
 static bool draw_exponential_orbit = false;
@@ -50,6 +49,14 @@ static bool mute = true;
 static bool drawIterPoints = false;
 static bool freezeOrbit = true, drawFreezeIndex = false;
 static bool noReflect = false;
+
+static enum class ColorMode { Normal, Grey, Inverse, Period, Count } color_mode;
+
+inline ColorMode& operator++(enum ColorMode& state, int) {
+  const int i = static_cast<int>(state) + 1;
+  state = static_cast<ColorMode>((i) % static_cast<int>(ColorMode::Count));
+  return state;
+}
 
 //Points
 static double x_c, y_c;//+C point
@@ -1231,15 +1238,7 @@ int main(int argc, char *argv[]) {
             PtToPolar(px, py, polarGridTheta, polarGridRadius);
           }
         } else if (keycode == sf::Keyboard::C) {
-          if (use_color)
-          {
-            use_color = false;
-            use_color2 = true;
-          }
-          else if (use_color2)
-            use_color2 = false;
-          else
-            use_color = true;
+          color_mode++;
           frame = 0;
         } else if (keycode == sf::Keyboard::R) {
           cam_x = cam_x_dest = 0.0;
@@ -1477,11 +1476,13 @@ int main(int argc, char *argv[]) {
     const bool eitherJulia = (juliaDrag || hasJulia);
     const bool drawJset = !juliaInvert && eitherJulia;
     const bool drawIJset = juliaInvert && eitherJulia;
-    const int flags = (drawMset ? 0x01 : 0) | (drawJset ? 0x02 : 0) | (use_color ? 0x04 : 0) | (use_color2 ? 0x10 : 0)
-      | (bottom_scroll_type == BottomScrollingType::Decard ? 0x08 : 0)
-      | (bottom_scroll_type == BottomScrollingType::DecardHalf ? 0x08 : 0)
-      | (noReflect ? 0x20 : 0)
-      | (drawIJset ? 0x40 : 0);
+    const int flags =
+      (drawMset ? 0x01 : 0) |
+      (drawJset ? 0x02 : 0) |
+      (noReflect ? 0x04 : 0) |
+      (bottom_scroll_type == BottomScrollingType::Decard ? 0x08 : 0) |
+      (bottom_scroll_type == BottomScrollingType::DecardHalf ? 0x08 : 0) |
+      (drawIJset ? 0x10 : 0);
 
     //Set the shader parameters
     const sf::Glsl::Vec2 window_res((float)window_w, (float)window_h);
@@ -1491,6 +1492,7 @@ int main(int argc, char *argv[]) {
     shader.setUniform("iDecardioid", (float)decardioid_amount);
     shader.setUniform("iStepsToAnti", iStepsToAnti);
     shader.setUniform("iFlags", flags);
+    shader.setUniform("iColorMode", static_cast<int>(color_mode));
     shader.setUniform("iJulia", sf::Vector2f((float)x_julia, (float)y_julia));
     shader.setUniform("iIters", graphics_iters);
     shader.setUniform("iTime", frame);
@@ -1590,7 +1592,7 @@ int main(int argc, char *argv[]) {
             DrawStep(x, y, x_c, y_c, i+1);
           }
 
-          if (use_color2)
+          if (color_mode == ColorMode::Inverse)
           {
             iStep++;
             if (iStepsNeeded == 0 && iStep == iStepsToAnti)

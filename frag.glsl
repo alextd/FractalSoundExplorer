@@ -15,11 +15,13 @@
 
 #define FLAG_DRAW_MSET ((iFlags & 0x01) == 0x01)
 #define FLAG_DRAW_JSET ((iFlags & 0x02) == 0x02)
-#define FLAG_USE_COLOR ((iFlags & 0x04) == 0x04)
+#define FLAG_NOREFLECT ((iFlags & 0x04) == 0x04)
 #define FLAG_DECARDIOID ((iFlags & 0x08) == 0x08)
-#define FLAG_USE_COLOR2 ((iFlags & 0x10) == 0x10)
-#define FLAG_NOREFLECT ((iFlags & 0x20) == 0x20)
-#define FLAG_DRAW_IJSET ((iFlags & 0x40) == 0x40)
+#define FLAG_DRAW_IJSET ((iFlags & 0x10) == 0x10)
+
+#define COLOR_GREY (iColorMode == 1)
+#define COLOR_INVERSE (iColorMode == 2)
+#define COLOR_PERIOD (iColorMode == 3)
 
 uniform vec2 iResolution;
 uniform vec2 iCam;
@@ -29,6 +31,7 @@ uniform float iDecardioid;
 uniform int iType;
 uniform int iIters;
 uniform int iFlags;
+uniform int iColorMode;
 uniform int iTime;
 uniform int iStepsToAnti;
 
@@ -99,7 +102,9 @@ VEC2 latte(VEC2 z, VEC2 c) {
   return cx_sqr(cx_sqr(z)+cx_one)/(4.0*z*(cx_sqr(z)-cx_one));
 }
 
-#if 0
+
+//For some reason, #define options on what DO_LOOP does with no comments
+#if 1
 #define DO_LOOP(name) \
   for (i = 0; i < iIters; ++i) { \
     VEC2 ppz = pz; \
@@ -166,7 +171,8 @@ VEC2 decardioidify(VEC2 p, float f)
 
 vec3 fractal(VEC2 z, VEC2 c) {
   bool faulty = false;
-  //VEC3 sumz = VEC3(0.0, 0.0, 0.0);
+  VEC2 pz = z;
+  VEC3 sumz = VEC3(0.0, 0.0, 0.0);
   int i, iStep = 0;
   if(FLAG_NOREFLECT)
   {
@@ -184,7 +190,7 @@ vec3 fractal(VEC2 z, VEC2 c) {
       case 9: DO_LOOP_NOREFLECT(latte); break;
     }
   }
-  else if(FLAG_USE_COLOR2)
+  else if(COLOR_INVERSE)
   {
     VEC2 pz = z;
     switch (iType) {
@@ -217,41 +223,37 @@ vec3 fractal(VEC2 z, VEC2 c) {
   }
   
   if(faulty) {
-      return vec3(0.2,0.0,0.0);
+    // todo: combine with coloration below
+    return vec3(0.2,0.0,0.0);
   }
+  
+    // Iterations ended early:
   if (i != iIters) {
-    if(FLAG_USE_COLOR)
+
+    if(COLOR_GREY)
     {
-      float n = float(i)/(iIters-1)*0.5f+0.5f;  //white to grey, for island detection
+      //white to grey, for island detection
+      float n = float(i)/(iIters-1)*0.5f+0.5f;
       return vec3(n, n, n);
     }
-    else if (FLAG_USE_COLOR2)
-    {
-      float n1 = cos(float(i) * 0.1) * 0.4 + 0.5;
-      float n2 = cos(float(i) * 0.1) * 0.3 + 0.6;
-      return vec3(0, n1, n2);
-    }
-    else
-    {
-      float n1 = cos(float(i) * 0.1) * 0.4 + 0.5;
-      float n2 = cos(float(i) * 0.1) * 0.3 + 0.6;
-      return vec3(0, n1, n2);
+
+    // Teal coloration:
+    float n1 = cos(float(i) * 0.1) * 0.4 + 0.5;
+    float n2 = cos(float(i) * 0.1) * 0.3 + 0.6;
+    return vec3(0, n1, n2);
+  } 
+
+    // Max iterations:
+  else
+  {
+    if (COLOR_PERIOD) {
+      // Color by period
+      sumz = abs(sumz) / iIters;
+      vec3 n1 = sin(abs(sumz * 5.0)) * 0.45 + 0.5;
+      return n1;
     } 
-  } 
-  else if (FLAG_USE_COLOR) {
-  
-    return vec3(0,0,0);
-    /*
-    sumz = abs(sumz) / iIters;
-    vec3 n1 = sin(abs(sumz * 5.0)) * 0.45 + 0.5;
-    return n1;
-    */
-  } 
-  else if (FLAG_USE_COLOR2) {
-    return vec3(0.0, 0.0, 0.0);
-  }
-  
-  else {
+
+    // Black
     return vec3(0.0, 0.0, 0.0);
   }
 }
