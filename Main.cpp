@@ -766,12 +766,12 @@ int highlight_index = 0;
 std::string hAsString;
 bool findFreezeIndex;
 double findx, findy;
-double decardioid_amount = 0;
+double decardioid_amount = 0, cpercent_amount = 1;
 int iStepsToAnti = 1;
 std::string cAsString, clickAsString;
 
 
-static enum class BottomScrollingType{ Brush, Edge,Decard, DecardHalf, Count } bottom_scroll_type;
+static enum class BottomScrollingType{ Brush, Edge,Decard, DecardHalf, CPercent, Count } bottom_scroll_type;
 
 inline BottomScrollingType& operator++(enum BottomScrollingType& state, int) {
   const int i = static_cast<int>(state) + 1;
@@ -783,8 +783,8 @@ inline BottomScrollingType& operator++(enum BottomScrollingType& state, int) {
 void InitPts()
 {
   //Set C and starting Z
-  x_c = hasJulia && !juliaInvert ? x_julia : x_click;
-  y_c = hasJulia && !juliaInvert ? y_julia : y_click;
+  x_c = cpercent_amount * (hasJulia && !juliaInvert ? x_julia : x_click);
+  y_c = cpercent_amount * (hasJulia && !juliaInvert ? y_julia : y_click);
   x_start = hasJulia && juliaInvert ? x_julia : x_click;
   y_start = hasJulia && juliaInvert ? y_julia : y_click;
 }
@@ -924,6 +924,17 @@ void StartScreenPoint(int sx, int sy)
 
         //doesn't change clickpoint so return here
         return;
+      }
+      case BottomScrollingType::CPercent:
+      {
+        //cpercent_amount = 2-(2.0 * sx / (window_w - 1));
+        cpercent_amount = 1-(1.0 * sx / (window_w - 1));
+        frame = 0;
+
+        if (hide_orbit)
+          return;
+
+        break;
       }
       case BottomScrollingType::Edge:
       {
@@ -1165,6 +1176,7 @@ int main(int argc, char *argv[]) {
   shader.setUniform("iCam", sf::Vector2f((float)cam_x, (float)cam_y));
   shader.setUniform("iZoom", (float)cam_zoom);
   shader.setUniform("iDecardioid", (float)decardioid_amount);
+  shader.setUniform("iCPercent", (float)cpercent_amount);
   shader.setUniform("iStepsToAnti", iStepsToAnti);
   SetFractal(shader, starting_fractal);
 
@@ -1490,6 +1502,7 @@ int main(int argc, char *argv[]) {
     shader.setUniform("iCam", sf::Vector2f((float)cam_x, (float)cam_y));
     shader.setUniform("iZoom", (float)cam_zoom);
     shader.setUniform("iDecardioid", (float)decardioid_amount);
+    shader.setUniform("iCPercent", (float)cpercent_amount);
     shader.setUniform("iStepsToAnti", iStepsToAnti);
     shader.setUniform("iFlags", flags);
     shader.setUniform("iColorMode", static_cast<int>(color_mode));
@@ -1863,7 +1876,7 @@ int main(int argc, char *argv[]) {
         "  F7 - Ikeda Map                      O - Draw cyclic iterations (each O skips +1 step, shift-O -1)\n"
         "  F8 - Chirikov Map                   B - Drag and draw lines. Ctrl-B connects to previous point. Shift-B erases.\n"
         "  F9 - Burning Ship                   \n"
-        "   I - Toggle bottom-edge slider mode: C=Cardioid Edge, Decardioid amount, C=Brush"
+        "   I - Toggle bottom-edge slider mode: Brush, Cardioid Edge, Decardioid amount, (1/2), Scale C"
       );
       helpMenu.setPosition(20.0f, 20.0f);
       window.draw(helpMenu);

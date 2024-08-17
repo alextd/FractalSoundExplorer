@@ -28,6 +28,7 @@ uniform vec2 iCam;
 uniform vec2 iJulia;
 uniform float iZoom;
 uniform float iDecardioid;
+uniform float iCPercent;
 uniform int iType;
 uniform int iIters;
 uniform int iFlags;
@@ -271,12 +272,16 @@ void main() {
     vec2 dxy = vec2(rand(i*0.54321 + iTime), rand(i*0.12345 + iTime));
     VEC2 c = VEC2((screen_pos + dxy) * vec2(1.0, -1.0) / iZoom - iCam);
     
+    
     if(FLAG_DECARDIOID){
       c = decardioidify(c, iDecardioid);
     }
 
     if (FLAG_DRAW_MSET) {
-      col += fractal(c, c);
+      if(iCPercent == 1)
+        col += fractal(c, c);
+      else
+        col += fractal(c, VEC2(iCPercent * c.x, iCPercent * c.y));
     }
     if (FLAG_DRAW_JSET) {
       col += fractal(c, iJulia);
